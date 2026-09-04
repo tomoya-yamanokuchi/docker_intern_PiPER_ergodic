@@ -1,0 +1,88 @@
+<launch>
+  <arg name="can_follower_R_port" default="can0" />
+  <arg name="can_leader_R_port" default="can1" />
+  <arg name="can_follower_L_port" default="can2" />
+  <arg name="can_leader_L_port" default="can3" />
+  <arg name="auto_enable" default="true" />
+  <arg name="gripper_val_mutiple" default="1" />
+  <arg name="video_R_port" default="0" />
+  <arg name="video_L_port" default="2" />
+
+  <!-- ================= Leader_Right ================= -->
+  <group ns="leaderR">
+    <node name="ctrl"
+          pkg="piper"
+          type="piper_ctrl_leader_node_new.py"
+          output="screen">
+      <param name="can_port" value="$(arg can_leader_R_port)" />
+      <param name="auto_enable" value="$(arg auto_enable)" />
+      <param name="gripper_val_mutiple" value="$(arg gripper_val_mutiple)" />
+      <param name="gripper_exist" value="true" />
+      <remap from="joint_ctrl_single" to="joint_grip_pose" />
+    </node>
+  </group>
+
+
+  <!-- ================= Follower_Right ================= -->
+  <group ns="followerR">
+    <node name="ctrl"
+          pkg="piper"
+          type="piper_ctrl_follower_node.py"
+          output="screen">
+      <param name="can_port" value="$(arg can_follower_R_port)" />
+      <param name="auto_enable" value="$(arg auto_enable)" />
+      <param name="gripper_val_mutiple" value="$(arg gripper_val_mutiple)" />
+      <param name="gripper_exist" value="true" />
+      <remap from="joint_ctrl_single" to="/leaderR/joint_grip_pose" />
+      <!-- leader pose topic -->
+      <remap from="/end_pose_euler" to="/leaderR/end_pose_euler" />
+    </node>
+
+    <!-- <node name="camera_pub"
+          pkg="piper"
+          type="camera_pub.py"
+          output="screen">
+      <param name="video_port" value="$(arg video_R_port)" />
+    </node> -->
+  </group>
+
+  <!-- ================= Leader_Left ================= -->
+  <group ns="leaderL">
+    <node name="ctrl"
+          pkg="piper"
+          type="piper_ctrl_leader_node_new.py"
+          output="screen">
+      <param name="can_port" value="$(arg can_leader_L_port)" />
+      <param name="auto_enable" value="$(arg auto_enable)" />
+      <param name="gripper_val_mutiple" value="$(arg gripper_val_mutiple)" />
+      <param name="gripper_exist" value="true" />
+      <remap from="joint_ctrl_single" to="joint_grip_pose" />
+    </node>
+  </group>
+
+
+  <!-- ================= Follower_Left ================= -->
+  <group ns="followerL">
+    <node name="ctrl"
+          pkg="piper"
+          type="piper_ctrl_follower_node_L.py"
+          output="screen">
+      <param name="can_port" value="$(arg can_follower_L_port)" />
+      <param name="auto_enable" value="$(arg auto_enable)" />
+      <param name="gripper_val_mutiple" value="$(arg gripper_val_mutiple)" />
+      <param name="gripper_exist" value="true" />
+      <remap from="joint_ctrl_single" to="/leaderL/joint_grip_pose" />
+      <!-- leader pose topic -->
+      <remap from="/end_pose_euler" to="/leaderL/end_pose_euler" />
+    </node>
+
+    <!-- <node name="camera_pub"
+          pkg="piper"
+          type="camera_pub.py"
+          output="screen">
+      <param name="video_port" value="$(arg video_L_port)" />
+    </node> -->
+  </group>
+
+</launch>
+

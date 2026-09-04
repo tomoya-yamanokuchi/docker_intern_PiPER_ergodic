@@ -1,0 +1,140 @@
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python environments
+.venv/
+venv/
+env/
+ENV/
+
+# Package / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / lint / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+
+# ============================================================
+# CMake / catkin build artifacts
+# ============================================================
+
+double_PiPER/build/
+double_PiPER/devel/
+double_PiPER/install/
+double_PiPER/log/
+double_PiPER/src/piper_sim/
+double_PiPER/src/piper_moveit/
+
+
+# ============================================================
+# Jupyter
+# ============================================================
+.ipynb_checkpoints/
+
+# Keep actual notebooks (*.ipynb) under version control.
+
+
+# ============================================================
+# Local experiment outputs
+# ============================================================
+logs/
+log/
+outputs/
+output/
+results/
+tmp/
+temp/
+
+*.log
+
+# Uncomment these if generated figures/videos should NOT be versioned.
+# figures/
+# videos/
+# *.mp4
+# *.gif
+
+
+# ============================================================
+# External repositories / temporary clones
+# ============================================================
+
+# If the original E2T2 repository is cloned only as an upstream reference,
+# ignore the clone and keep your modified notebooks/scripts elsewhere.
+workspace/Ergodic_Exploration_using_Tensor_Train/
+
+# If you instead want to version-control your modified E2T2 notebooks,
+# place them in e.g. notebooks/ and keep that directory tracked.
+
+
+# ============================================================
+# IDE / editor
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+
+# ============================================================
+# OS-generated files
+# ============================================================
+.DS_Store
+Thumbs.db
+
+
+# ============================================================
+# Environment / machine-local settings
+# ============================================================
+.env
+.env.*
+!.env.example
+
+# Jupyter runtime files
+.jupyter/
+.local/share/jupyter/runtime/
+
+
+# ============================================================
+# Robot / CAN local configuration
+# ============================================================
+
+# Add machine-specific CAN/USB configuration files here if created.
+# Example:
+# config/can_local.yaml
+
+
+# ============================================================
+# Large local datasets / recordings
+# ============================================================
+data/
+datasets/
+recordings/
+bags/
+*.bag
+
+
+# ============================================================
+# Optional model / checkpoint files
+# ============================================================
+checkpoints/
+*.ckpt
+*.pth
+*.pt
+*.onnx
+
+.make

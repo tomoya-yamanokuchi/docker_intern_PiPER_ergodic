@@ -1,0 +1,12 @@
+<launch>
+  <arg name="video_port" default="0" />
+
+  <node name="camera_pub"
+        pkg="piper"
+        type="camera_pub.py"
+        output="screen">
+    <param name="video_port" value="$(arg video_port)" />
+  </node>
+  
+</launch>
+
