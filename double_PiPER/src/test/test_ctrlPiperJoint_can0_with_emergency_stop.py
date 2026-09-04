@@ -10,8 +10,8 @@ if __name__ == "__main__":
         joint_state = piper.get_joint_states()[0]
         if have_gripper:
             return joint_state + (piper.get_gripper_states()[0][0], )
-        return joint_state 
-    
+        return joint_state
+
     def stop():
         '''Stop the robotic arm; this function must be called first when exiting the teaching mode for the first time to control the robotic arm in CAN mode'''
         interface.EmergencyStop(0x01)
@@ -24,7 +24,7 @@ if __name__ == "__main__":
         # Restore the robotic arm
         piper.disable_arm()
         time.sleep(1.0)
-    
+
     def enable():
         '''Enable the robotic arm and gripper'''
         while not piper.enable_arm():
@@ -92,42 +92,42 @@ if __name__ == "__main__":
 
         while time.time() - start < run_time:
 
-        t = time.time() - start
+            t = time.time() - start
 
-        joints = base.copy()
+            joints = base.copy()
 
-        # ===== 円運動 =====
-        joints[0] = base[0] + radius * math.cos(omega * t)
-        joints[1] = base[1] + radius * math.sin(omega * t)
-        joints[2] = base[2] + radius * math.cos(omega * t)
-        joints[3] = base[3] + radius * math.sin(omega * t)
-        joints[4] = base[4] + radius * math.cos(omega * t)
-        joints[5] = base[5] + radius * math.sin(omega * t)
+            # ===== 円運動 =====
+            joints[0] = base[0] + radius * math.cos(omega * t)
+            joints[1] = base[1] + radius * math.sin(omega * t)
+            joints[2] = base[2] + radius * math.cos(omega * t)
+            joints[3] = base[3] + radius * math.sin(omega * t)
+            joints[4] = base[4] + radius * math.cos(omega * t)
+            joints[5] = base[5] + radius * math.sin(omega * t)
 
 
-        piper.move_j(joints, move_spd_rate_ctrl)
+            piper.move_j(joints, move_spd_rate_ctrl)
 
-        # ===== グリッパー開閉（sin波）=====
-        # g = (math.sin(grip_omega * t) + 1) / 2
-        # grip_pos = grip_min + g * (grip_max - grip_min)
+            # ===== グリッパー開閉（sin波）=====
+            # g = (math.sin(grip_omega * t) + 1) / 2
+            # grip_pos = grip_min + g * (grip_max - grip_min)
 
-        # piper.move_gripper(grip_pos, 1)
+            # piper.move_gripper(grip_pos, 1)
 
-        print("===================")
-        # print("Joint: ", joints)
-        # print("Gripper: ", grip_pos)
-        print("Joint_Pos;",piper.get_joint_states()[0])###Jointの現在状態
-        # print("gripper:", piper.get_gripper_states()[0][0])
-        print("End_Pos_Eular;",piper.get_end_pose_euler()[0])
-        # print("x;",piper.get_end_pose_euler()[0][0])
-        # print("y;",piper.get_end_pose_euler()[0][1])
-        # print("z;",piper.get_end_pose_euler()[0][2])
-        # print("rx;",piper.get_end_pose_euler()[0][3])
-        # print("ry;",piper.get_end_pose_euler()[0][4])
-        # print("rz;",piper.get_end_pose_euler()[0][5])
-        print("===================\n\n")
-        
-        time.sleep(dt)
+            print("===================")
+            # print("Joint: ", joints)
+            # print("Gripper: ", grip_pos)
+            print("Joint_Pos;",piper.get_joint_states()[0])###Jointの現在状態
+            # print("gripper:", piper.get_gripper_states()[0][0])
+            print("End_Pos_Eular;",piper.get_end_pose_euler()[0])
+            # print("x;",piper.get_end_pose_euler()[0][0])
+            # print("y;",piper.get_end_pose_euler()[0][1])
+            # print("z;",piper.get_end_pose_euler()[0][2])
+            # print("rx;",piper.get_end_pose_euler()[0][3])
+            # print("ry;",piper.get_end_pose_euler()[0][4])
+            # print("rz;",piper.get_end_pose_euler()[0][5])
+            print("===================\n\n")
+
+            time.sleep(dt)
 
     except KeyboardInterrupt:
 
