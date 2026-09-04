@@ -16,8 +16,9 @@ if __name__ == "__main__":
     # MIT test joint
     # MIT_JOINT = 6
     # MIT_JOINTS = [5, 6]
-    # MIT_JOINTS = [4, 5, 6]
-    MIT_JOINTS = [3, 4, 5, 6]
+    MIT_JOINTS = [4, 5, 6]
+    # MIT_JOINTS = [3, 4, 5, 6]
+    # MIT_JOINTS = [6]
 
     # Small displacement around the CURRENT joint position
     # 0.03 rad ~= 1.72 deg
@@ -25,8 +26,15 @@ if __name__ == "__main__":
     DELTA = 0.015
 
     # MIT impedance parameters
-    KP = 10.0
-    KD = 0.8
+    # KP = 10.0
+    # KD = 0.8
+
+    # KP = 2.0
+    # KD = 0.2
+
+    KP = 1.0
+    KD = 0.1
+
     VEL_REF = 0.0
     TORQUE_FF = 0.0
 
@@ -34,7 +42,7 @@ if __name__ == "__main__":
     HOLD_TIME = 1.0
 
     # Number of test cycles
-    NUM_CYCLES = 3
+    NUM_CYCLES = 10
 
     # Used for the normal Joint mode during initialization
     move_spd_rate_ctrl = 20
@@ -293,30 +301,54 @@ if __name__ == "__main__":
 
             targets_list = [
                 {
-                    3: q0[3] + DELTA,
                     4: q0[4] + DELTA,
                     5: q0[5] + DELTA,
                     6: q0[6] + DELTA,
                 },
                 {
-                    3: q0[3],
                     4: q0[4],
                     5: q0[5],
                     6: q0[6],
                 },
                 {
-                    3: q0[3] - DELTA,
                     4: q0[4] - DELTA,
                     5: q0[5] - DELTA,
                     6: q0[6] - DELTA,
                 },
                 {
-                    3: q0[3],
                     4: q0[4],
                     5: q0[5],
                     6: q0[6],
                 },
             ]
+
+
+            # targets_list = [
+            #     {
+            #         3: q0[3] + DELTA,
+            #         4: q0[4] + DELTA,
+            #         5: q0[5] + DELTA,
+            #         6: q0[6] + DELTA,
+            #     },
+            #     {
+            #         3: q0[3],
+            #         4: q0[4],
+            #         5: q0[5],
+            #         6: q0[6],
+            #     },
+            #     {
+            #         3: q0[3] - DELTA,
+            #         4: q0[4] - DELTA,
+            #         5: q0[5] - DELTA,
+            #         6: q0[6] - DELTA,
+            #     },
+            #     {
+            #         3: q0[3],
+            #         4: q0[4],
+            #         5: q0[5],
+            #         6: q0[6],
+            #     },
+            # ]
 
 
             for targets in targets_list:
