@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(python main.py*)",
+      "Bash(python3 main.py*)",
+      "Bash(python test_*)",
+      "Bash(python3 test_*)",
+      "Bash(python print_joint_limits.py*)",
+      "Bash(python3 print_joint_limits.py*)",
+      "Bash(python workspace/src/main.py*)",
+      "Bash(python3 workspace/src/main.py*)",
+      "Bash(python workspace/src/test_*)",
+      "Bash(python3 workspace/src/test_*)",
+      "Bash(python workspace/src/print_joint_limits.py*)",
+      "Bash(python3 workspace/src/print_joint_limits.py*)",
+      "Bash(uv run main.py*)",
+      "Bash(uv run test_*)"
+    ],
+    "allow": [
+      "Bash(pytest*)",
+      "Bash(ruff*)",
+      "Bash(mypy*)",
+      "Bash(pyright*)",
+      "Bash(cmake*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(gh pr view*)",
+      "Bash(gh issue view*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/quality-gate.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -148,7 +148,7 @@ The PiPER CAN bitrate is normally:
 Go to:
 
 ```bash
-cd /home/jens/workspace/docker_PiPER_env_ver2/double_PiPER/src/test
+cd ~/workspace/docker_intern_PiPER_ergodic/double_PiPER/src/test
 ```
 
 
