@@ -5,7 +5,7 @@ export IMAGE_NAME=docker-piper-ergodic
 export CONTAINER_NAME=piper-ergodic
 
 # X11 cookie for the container. meshcat needs none of this -- it renders in the
-# host browser -- but matplotlib windows (tools/live_viewer.py --traces) do.
+# host browser -- but matplotlib windows (visualization watch --plot traces) do.
 #
 # The host's own cookie lives under /run/user/1004/gdm/, which is awkward to
 # mount, so it is copied out here. The sed rewrites the address family to
