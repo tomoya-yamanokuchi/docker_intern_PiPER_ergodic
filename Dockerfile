@@ -128,7 +128,7 @@ RUN python -m pip install --no-cache-dir \
 RUN python --version && \
     python -c "import can; print('python-can: OK')" && \
     python -c "from piper_sdk import Piper; print('piper_sdk.Piper: OK')" && \
-    python -c "import tt; print('ttpy: OK')" \
+    python -c "import tt; print('ttpy: OK')" && \
     python -c "import pinocchio as pin, coal; print(pin.__version__)"
 
 
