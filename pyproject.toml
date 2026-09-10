@@ -1,0 +1,42 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+  "E", "F",      # pycodestyle, pyflakes
+  "I",           # import sorting
+  "UP",          # pyupgrade
+  "B",           # bugbear: mutable defaults, loop-variable capture
+  "SIM",         # nested conditionals, redundant branches
+  "C90",         # mccabe cyclomatic complexity
+  "PL",          # pylint: too many branches/statements/args
+  "ARG",         # unused arguments (leftovers from abandoned approaches)
+  "NPY",         # numpy-specific rules
+  "RUF",
+]
+ignore = [
+  "E501",        # line length is the formatter's job
+  "PLR2004",     # magic numbers: too noisy in numerical code
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+
+[tool.ruff.lint.pylint]
+max-branches = 8
+max-statements = 30
+max-args = 6
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004", "ARG"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+# Optional but recommended for numerical code — see /numeric-check.
+# dev dependency: hypothesis
+[tool.pyright]
+include = ["workspace/src"]
+typeCheckingMode = "standard"   # "strict" once the codebase settles
