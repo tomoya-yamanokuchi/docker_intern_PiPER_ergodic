@@ -113,6 +113,13 @@ RUN python -m pip install \
 RUN python -m pip install \
     "ttpy[fast] @ git+https://github.com/oseledets/ttpy"
 
+#####################################################
+# Pinocchio / IK Solver and Collision checking
+#####################################################
+RUN python -m pip install --no-cache-dir \
+ "pin==4.1.0" \
+  meshcat \
+  robot_descriptions
 
 #####################################################
 # Build-time sanity check
@@ -121,7 +128,8 @@ RUN python -m pip install \
 RUN python --version && \
     python -c "import can; print('python-can: OK')" && \
     python -c "from piper_sdk import Piper; print('piper_sdk.Piper: OK')" && \
-    python -c "import tt; print('ttpy: OK')"
+    python -c "import tt; print('ttpy: OK')" \
+    python -c "import pinocchio as pin, coal; print(pin.__version__)"
 
 
 #####################################################
