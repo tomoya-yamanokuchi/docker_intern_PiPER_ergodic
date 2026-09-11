@@ -59,6 +59,9 @@ temp/
 
 *.log
 
+# Weekly progress reports (LaTeX), kept out of the code history
+weekly_reports/
+
 # Uncomment these if generated figures/videos should NOT be versioned.
 # figures/
 # videos/
