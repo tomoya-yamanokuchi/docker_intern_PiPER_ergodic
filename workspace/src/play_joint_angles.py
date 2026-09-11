@@ -11,6 +11,7 @@ Run from workspace/src:  python play_joint_angles.py
 """
 
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,10 @@ from scipy.spatial.transform import Rotation as R
 
 from controller.task_imp_controller import CartesianImpedanceController
 from direct_teaching.player.joint_angle_player import JointAnglePlayer
+from direct_teaching.player.tracking_error import (
+    compute_tracking_errors,
+    save_tracking_error_plot,
+)
 from execution.executor_helpers import (
     apply_joint_torques,
     connect_arm,
@@ -60,26 +65,17 @@ def main() -> None:
     print(f"q = {np.round(joint_angles, 4)} rad")
     print(f"playing {recording} for {player.duration:.1f} s incl. approach, then holding")
     print("Ctrl-C to stop")
+    log = []  # (t s, q (6,) rad) per cycle; the target is recomputed from t
     try:
         t0 = time.monotonic()
         while True:
             start_time = time.monotonic()
             t = start_time - t0
 
-            joint_angles = np.array(robot.get_joint_angles().msg)
-            joint_velocities = read_joint_velocities(robot)
-
-            x_target, r_target = controller.pin_model.forward_kinematics(
-                player.joint_angles_at(t), EE_FRAME_NAME
+            joint_angles = run_control_cycle(
+                robot, controller, player.joint_angles_at(t), R_world_base
             )
-            cmd_torque = controller.compute_cartesian_torque(
-                desired_pos=x_target,
-                desired_ori=r_target,
-                q_cur=joint_angles,
-                v_cur=joint_velocities,
-                base_orientation=R_world_base,
-            )
-            apply_joint_torques(robot, cmd_torque)
+            log.append((t, joint_angles))
 
             elapsed_time = time.monotonic() - start_time
             if elapsed_time < period:
@@ -90,7 +86,47 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\ninterrupted, holding current pose")
     finally:
+        # Hold before plotting, so a failed plot cannot leave the arm unheld.
         hold_current_pose(robot, joint_angles)
+        if log:
+            save_tracking_error(controller, player, log)
+
+
+def run_control_cycle(
+    robot,
+    controller: CartesianImpedanceController,
+    q_target: np.ndarray,  # (6,) rad
+    R_world_base: np.ndarray,  # (3, 3)
+) -> np.ndarray:  # (6,) rad, the q the torque was computed from
+    """Read the state, send the torque pulling the flange to FK(q_target)."""
+    joint_angles = np.array(robot.get_joint_angles().msg)
+    joint_velocities = read_joint_velocities(robot)
+    x_target, r_target = controller.pin_model.forward_kinematics(q_target, EE_FRAME_NAME)
+    cmd_torque = controller.compute_cartesian_torque(
+        desired_pos=x_target,
+        desired_ori=r_target,
+        q_cur=joint_angles,
+        v_cur=joint_velocities,
+        base_orientation=R_world_base,
+    )
+    apply_joint_torques(robot, cmd_torque)
+    return joint_angles
+
+
+def save_tracking_error(
+    controller: CartesianImpedanceController,
+    player: JointAnglePlayer,
+    log: list[tuple[float, np.ndarray]],
+) -> None:
+    t, q = (np.array(column) for column in zip(*log, strict=True))
+    q_target = np.array([player.joint_angles_at(t_i) for t_i in t])
+    position_error, orientation_error = compute_tracking_errors(
+        controller.pin_model, q, q_target, EE_FRAME_NAME
+    )
+    path = OUTPUT_DIR / f"tracking_error_{datetime.now():%Y%m%d_%H%M%S}.png"
+    t_recording = (float(player.t[1]), player.duration)
+    save_tracking_error_plot(t, position_error, orientation_error, t_recording, path)
+    print(f"saved tracking error plot to {path}")
 
 
 if __name__ == "__main__":
