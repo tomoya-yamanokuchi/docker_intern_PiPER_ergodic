@@ -20,7 +20,8 @@ touch ${XAUTH}
 xauth nlist "${DISPLAY}" | sed -e 's/^..../ffff/' | xauth -f ${XAUTH} nmerge -
 chmod 644 ${XAUTH}
 
-
+# PYTHONPATH carries two import roots: our code in workspace/src, and
+# agx_reference, whose files import core.* / controller.* as top-level packages.
 docker run --rm -it \
     --name ${CONTAINER_NAME} \
     --privileged \
@@ -31,6 +32,8 @@ docker run --rm -it \
     --env XAUTHORITY=${XAUTH} \
     --volume "${XAUTH}:${XAUTH}:ro" \
     --volume "/tmp/.X11-unix:/tmp/.X11-unix:ro" \
+    \
+    --env PYTHONPATH="/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic/workspace/src:/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic/workspace/src/agx_reference" \
     \
 	--volume "/home/${USR_NAME}/Ergodic_Exploration_using_Tensor_Train:/home/${USR_NAME}/workspace/Ergodic_Exploration_using_Tensor_Train" \
 	\

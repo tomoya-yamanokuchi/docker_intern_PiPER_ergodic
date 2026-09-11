@@ -1,6 +1,9 @@
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# The two import roots run.sh puts on PYTHONPATH, so isort sees core/controller
+# as first-party.
+src = ["workspace/src", "workspace/src/agx_reference"]
 
 # Verbatim copies of kehuanjack/agilex-arm-gravity-compensation @ imp, kept
 # byte-identical to the version that was validated on this arm. Reformatting
@@ -45,4 +48,5 @@ addopts = "-q --strict-markers"
 # dev dependency: hypothesis
 [tool.pyright]
 include = ["workspace/src"]
+extraPaths = ["workspace/src/agx_reference"]
 typeCheckingMode = "standard"   # "strict" once the codebase settles
