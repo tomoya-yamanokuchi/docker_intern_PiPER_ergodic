@@ -143,10 +143,6 @@ checkpoints/
 # Vendored robot description
 # ============================================================
 
-# The collada variants are for ROS/Gazebo and nothing in workspace/src reads
-# them; the URDFs and the STLs it does read are tracked.
-workspace/robot_description/meshes/dae/
-workspace/robot_description/meshes/*.dae
-
-# Compiled binary, a build artifact of the xacro tooling.
-workspace/robot_description/urdf/compile
+# agx_reference carries its own description and all of it is tracked: the URDF
+# references the .dae meshes for <visual> and the .stl meshes for <collision>,
+# so ignoring either set would leave a fresh clone with an unloadable model.

@@ -2,6 +2,12 @@
 line-length = 100
 target-version = "py310"
 
+# Verbatim copies of kehuanjack/agilex-arm-gravity-compensation @ imp, kept
+# byte-identical to the version that was validated on this arm. Reformatting
+# them would destroy the only thing they are for, so this is an exclusion of
+# third-party code rather than a suppression in ours.
+extend-exclude = ["workspace/src/agx_reference"]
+
 [tool.ruff.lint]
 select = [
   "E", "F",      # pycodestyle, pyflakes

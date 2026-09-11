@@ -100,6 +100,16 @@ RUN python -m pip install \
 RUN python -m pip install \
     "git+https://github.com/agilexrobotics/piper_sdk.git@1_0_0_beta"
 
+# AgileX's newer SDK, installed alongside piper_sdk rather than
+# replacing it. Both import fine; only one may hold can0 at a
+# time. It is here because it scales the MIT t_ff argument to
+# real N.m per firmware profile, which piper_sdk does not, and a
+# Cartesian impedance controller puts its whole output through
+# t_ff.
+
+RUN python -m pip install \
+    "git+https://github.com/agilexrobotics/pyAgxArm.git"
+
 
 #####################################################
 # Tensor Train / Ergodic Control
@@ -128,6 +138,7 @@ RUN python -m pip install --no-cache-dir \
 RUN python --version && \
     python -c "import can; print('python-can: OK')" && \
     python -c "from piper_sdk import Piper; print('piper_sdk.Piper: OK')" && \
+    python -c "from pyAgxArm import AgxArmFactory; print('pyAgxArm: OK')" && \
     python -c "import tt; print('ttpy: OK')" && \
     python -c "import pinocchio as pin, coal; print(pin.__version__)"
 

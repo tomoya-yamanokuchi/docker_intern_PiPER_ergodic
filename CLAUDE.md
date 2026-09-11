@@ -1,27 +1,36 @@
-# CLAUDE.md — PiPER Ergodic / MIT Impedance Control
+# CLAUDE.md — PiPER Ergodic / Cartesian Impedance Control
 
-Guidance for Claude Code when working in this repository.
-
-Other docs, not duplicated here: `PROGRESS.md` (what works, known gaps, next
-steps), `workspace/src/docs/executables.md` (everything runnable, and how),
-`workspace/src/docs/joint-limits.md`, `workspace/src/kinematics/README.md` (how
-the IK works).
+Guidance for Claude Code when working in this repository. It is the only
+document: `PROGRESS.md`, `docs/` and `kinematics/README.md` were all removed in
+the cleanup, so anything worth keeping lives here.
 
 ---
 
 ## 1. Hard rules
 
 1. **Never run Python that can move the robot.** A real AgileX PiPER arm is
-   physically connected. Do not execute `workspace/src/main.py`, the
-   `test_*` scripts, or anything calling `enable_arm`, `move_j`, `ModeCtrl`,
-   `JointMitCtrl` or `EmergencyStop`. The user runs those manually; Claude
-   **writes the code and reads the output** the user pastes back.
-   Read-only inspection is fine: sources, the installed `piper_sdk`,
-   `ip link show can0`, `candump can0`. Anything under `kinematics/` or
-   `visualization/` is hardware-free and safe to run.
+   physically connected. Do not execute anything under
+   `workspace/src/agx_reference/piper/`, or anything calling `robot.enable()`,
+   `robot.connect()`, `move_mit`, `move_p` or `move_j`. The user runs those
+   manually; Claude **writes the code and reads the output** the user pastes
+   back. Read-only inspection is fine: sources, the installed `pyAgxArm`,
+   `ip link show can0`, `candump can0`.
+
+   The hardware line runs through `pyAgxArm`, and it falls inside
+   `agx_reference`: **`core/` and `controller/` import no SDK and are safe to
+   run**, so a torque law, an FK call or an analysis of recorded data can be
+   checked offline; only `piper/main_*.py` open a session with the arm. Keep
+   that split when adding code — a new control law belongs in `controller/`,
+   where it can be exercised with no arm attached.
 2. **Never create git commits**, and never add `Co-Authored-By: Claude` or
    `Claude-Session:` trailers.
-3. **Only `workspace/src/` is live code.** `double_PiPER/` is the vendor's ROS1
+3. **`workspace/src/agx_reference/` is third-party code that stays close to
+   upstream.** See §4. Do not reformat it, do not restyle its Chinese comments,
+   do not "fix" its bare `except:` clauses. `pyproject.toml` excludes it from
+   ruff for exactly this reason. **Deliberate extensions are expected** — the
+   recorder in §3 is one — but each should be a small, stated diff that still
+   reads against upstream, never an incidental rewrite.
+4. **Only `workspace/src/` is live code.** `double_PiPER/` is the vendor's ROS1
    package tree, kept purely as reference. No ROS is used anywhere here. Do not
    add to, build or "fix" `double_PiPER/`.
 
@@ -33,9 +42,8 @@ the IK works).
 (`double_PiPER/README(EN).md` §2.2): stopping the arm lets it fall with constant
 damping, resetting it makes it lose power and fall immediately.
 
-Everything that removes torque drops the arm: cutting AC, the E-stop,
-`disable_arm()`, `EmergencyStop()`, and MIT mode with `Kp = Kd = 0`. This is why
-`stop()` waits for a "safe configuration" before `disable_arm()`.
+Everything that removes torque drops the arm: cutting AC, the E-stop, disabling
+the arm, and MIT mode with `kp = kd = t_ff = 0`.
 
 Before a deliberate power-down: command the arm low and retracted if CAN works,
 otherwise physically support it and clear the swing path. Power-cycle sequence:
@@ -46,40 +54,201 @@ USB re-plug leaves the interface DOWN with no bitrate).
 
 ## 3. What this project is
 
-Direct, ROS-free control of an AgileX PiPER 6-DoF arm from Python via
-`piper_sdk` over SocketCAN, working towards an ergodic-exploration controller
-(E2T2, tensor-train) driving a peg-in-hole style contact task.
-
-The current milestone is **MIT mode (joint impedance) control**: commanding each
-joint with `(pos_ref, vel_ref, kp, kd, t_ref)` instead of a position setpoint,
-so the arm is compliant.
+Direct, ROS-free control of an AgileX PiPER 6-DoF arm from Python over
+SocketCAN, working towards an ergodic-exploration controller (E2T2, tensor-train)
+driving a peg-in-hole style contact task.
 
 ```
-E2T2 / ergodic controller  ->  Python 3.10  ->  piper_sdk (1.0.0, 1_0_0_beta)
+E2T2 / ergodic controller  ->  Python 3.10  ->  pyAgxArm
   ->  python-can  ->  socketcan  ->  can0 (gs_usb USB-CAN @ 1 Mbit/s)  ->  PiPER
 ```
 
+The milestone reached is **Cartesian impedance control**: the end effector
+behaves like a spring-damper in task space while the joints stay compliant,
+which is what a contact task needs. That is what `agx_reference/` does and it
+is validated on this arm.
+
+**The repository was cut back to exactly that.** `workspace/src/` now contains
+`agx_reference/` and nothing else — the `piper_sdk` adapter, the hand-written
+kinematics, the visualisation application and every doc but this one were
+deleted. The rule going forward: build on `agx_reference`, and let the tree grow
+again only where the ergodic controller actually needs it. Anything deleted is
+recoverable from git history; prefer recovering a specific file over rewriting
+it, but do not restore a module speculatively.
+
+### Next milestone: a distribution over joint-angle poses
+
+The task in front of us is to **extend `piper/main_gc.py` to record joint angles
+over time and build a distribution of joint-angle poses from them.**
+
+`main_gc.py` is the right host for this because gravity compensation leaves the
+arm free to be backdriven by hand: the operator moves it through the poses that
+matter and the loop, already running at 200 Hz, is the natural place to sample
+`q`. The recorded distribution is the empirical one an ergodic controller needs —
+it turns a human demonstration of "where the interesting configurations are"
+into the target the E2T2 machinery explores against.
+
+What that implies, and is worth settling before writing code:
+
+- **Record, then analyse.** Writing samples is a loop concern; histogramming or
+  fitting them is not, and the analysis must run offline with no arm attached
+  (see the hard-rule split in §1). Do not put the estimator inside the 200 Hz
+  loop.
+- **The loop's timing budget is 5 ms and it already warns when it overruns.**
+  Whatever the recorder does per cycle must be cheap — append to a preallocated
+  array or a list, and write the file once at exit, not per sample.
+- **`main_gc.py` already reads `q` every cycle**, so recording adds no CAN
+  traffic; it is a tap on data that is already there.
+- **The exit path is where the file gets written**, and it is also what keeps the
+  arm up (§4). Do not add a code path that can leave the arm without its
+  position-hold hand-off because a file write raised.
+- **Joint angles are radians**, and the per-joint support for any binning is the
+  limit table in §8 — the ranges are wildly unequal (joint 2 spans 180°, joint 5
+  spans 140° but is centred on zero), so a shared bin width across joints would
+  be wrong.
+- The recording is data, so it belongs in the gitignored `workspace/output/`.
+
+`main_gc.py` is upstream code (§4). Extending it means it stops being
+byte-identical, which is fine and expected — but say so, and keep the diff small
+enough to read against upstream.
+
 ---
 
-## 4. Environment
+## 4. Current state: `agx_reference/` is the working implementation
+
+`workspace/src/agx_reference/` is the **current fully working state of
+implementation**, validated on this arm, and since the cleanup it is the only
+code in `workspace/src/`. Build the ergodic controller on top of it; do not start
+a parallel stack.
+
+It is a copy of `kehuanjack/agilex-arm-gravity-compensation` @ `imp`, kept as
+close to verbatim as possible — the point is that it stays the version validated
+on this arm, so do not reformat it. Checked against the local upstream checkout
+at `~/agilex-arm-gravity-compensation`: `agx_pinocchio.py`,
+`task_imp_controller.py`, `main_gc.py` and `main_tast_imp.py` are byte-identical;
+`main_jnt_imp.py` and `jnt_imp_controller.py` carry one deliberate change —
+`PiperFW.V189` → `PiperFW.DEFAULT`, so all three demos now agree on the profile
+this arm's firmware needs — plus stripped trailing whitespace. Six files,
+~800 lines:
+
+```
+workspace/src/agx_reference/
+├── core/agx_pinocchio.py              # Pinocchio wrapper: FK, Jacobian, nle, rnea
+├── controller/
+│   ├── task_imp_controller.py         # CartesianImpedanceController -> joint torques
+│   └── jnt_imp_controller.py          # JointImpedanceController   -> joint torques
+└── piper/
+    ├── main_gc.py                     # demo 1: pure gravity compensation
+    ├── main_tast_imp.py               # demo 2: Cartesian impedance hold [sic: "tast"]
+    ├── main_jnt_imp.py                # demo 3: joint impedance hold
+    └── piper/{urdf,meshes}/           # its own reduced 6-DoF description
+```
+
+All three demos are **torque-only streaming at 200 Hz**:
+
+```python
+robot.move_mit(joint_id, 0, 0, 0, 0, tau[joint_id - 1])   # p=v=kp=kd=0
+```
+
+so the joint driver adds nothing of its own — the arm is held entirely by the
+torque this Python loop computes. The three differ only in what they add on top
+of the same `nle` compensation:
+
+| demo | torque law |
+|---|---|
+| `main_gc.py` | `rnea(q, qd, 0)` — compensation only, arm is free to push around |
+| `main_jnt_imp.py` | `K*(q_des - q) + B*(qd_des - qd) + nle` — joint-space spring-damper |
+| `main_tast_imp.py` | `w * J.T @ (Kc*x_err + Bc*v_err) + nle` — task-space spring-damper |
+
+Joint impedance holds joint angles; Cartesian impedance holds an end-effector
+pose and leaves the null space free, which is the one a contact task wants.
+
+Their validated gains — joint-space, from `main_jnt_imp.py`:
+
+| quantity | value |
+|---|---|
+| `k` (joint stiffness) | `[10, 10, 10, 2, 1, 1]` N·m/rad |
+| `b` (joint damping) | `[0.5, 0.8, 0.8, 0.2, 0.2, 0.2]` |
+
+and task-space, from `main_tast_imp.py`:
+
+| quantity | value |
+|---|---|
+| `k` (Cartesian stiffness) | `[200, 200, 200, 5, 5, 5]` — N/m for x,y,z, N·m/rad for rx,ry,rz |
+| `b` (Cartesian damping) | `[5, 5, 5, 0.2, 0.2, 0.2]` |
+| `joint_torque_weights` | `[1, 1, 1, 0.5, 1, 0.5]` — trims the wrist joints |
+| `ee_frame_name` | `link6` |
+| control rate | 200 Hz |
+
+**The exit pattern matters.** All three demos catch `KeyboardInterrupt` and
+switch every joint to a position hold at the angle it is currently at:
+
+```python
+robot.move_mit(joint_id, joint_angles[joint_id - 1], 0, 10, 0.8, 0)
+```
+
+That hands the arm to the joint driver's own PD loop (`kp=10`, `kd=0.8`) so it
+stays up after Python exits. Any new control loop built on these must end the
+same way. A loop that simply stops streaming leaves the **last torque latched**
+(§8) — for gravity compensation that roughly holds the crash pose, but it no
+longer tracks, so the arm sags or drifts if anything disturbs it.
+
+Known rough edges, left alone deliberately: the filename typo
+`main_tast_imp.py`; bare `except:` in the exit handlers; Chinese comments. One
+worth knowing before extending the loop: `joint_velocities` is gathered through
+six separate `get_motor_states()` calls every cycle, which is the first thing to
+profile if the 200 Hz loop starts printing its overrun warning.
+
+### What is NOT in `agx_reference`
+
+No IK, no trajectory generation, no logging or telemetry, no visualisation, no
+joint-limit enforcement beyond what the firmware does, and no Cartesian target
+that moves — the demos hold the pose they start in. Those are the pieces the
+ergodic controller will have to add, and the first of them is the recorder in
+§3.
+
+**There is no IK in the tree at all any more.** The interface is torque-level, so
+none of the demos need one, and the hand-written closed-form solver was deleted
+with the rest of `kinematics/`. When the ergodic controller needs to place the
+end effector by pose, recover `ik.py` / `ik_closed.py` (plus `fk.py`,
+`transform.py`, `model.py` and `selftest.py`) from git history rather than
+writing a new one — they were verified against Pinocchio to 2e-16 and round-trip
+5000 random poses. Their URDF loader locks gripper joints that
+`agx_reference`'s 6-joint URDF does not have, so re-pointing it at that model
+takes an edit.
+
+---
+
+## 5. Environment
 
 Everything runs inside Docker; host `tsukumo3090ti`, user `jens` (uid/gid 1004).
 Image `docker-piper-ergodic` (`build.sh`), container `piper-ergodic` (`run.sh`,
 `--privileged --net=host`), Ubuntu 22.04 / Python 3.10, with `python-can`,
-`piper_sdk` 1.0.0, `ttpy[fast]`, numpy/scipy/matplotlib, `pin` 4.1.0, `meshcat`.
+`pyAgxArm`, `piper_sdk` 1.0.0, `ttpy[fast]`, numpy/scipy/matplotlib, `pin` 4.1.0,
+`meshcat`.
+
+`piper_sdk` is still installed alongside `pyAgxArm`. Both import fine, but only
+one may hold `can0` at a time. Nothing in `workspace/src/` imports `piper_sdk`
+any more.
 
 Mounts: `~/docker_intern_PiPER_ergodic` → `/home/jens/workspace/docker_intern_PiPER_ergodic`,
-and `~/Ergodic_Exploration_using_Tensor_Train` alongside it. So the code lives at
+with `~/Ergodic_Exploration_using_Tensor_Train` and
+`~/agilex-arm-gravity-compensation` (the upstream of `agx_reference/`) alongside
+it. So the code lives at
 `/home/jens/workspace/docker_intern_PiPER_ergodic/workspace/src` **inside** the
 container.
 
 `--net=host` means `can0` is the same interface on both sides, and every viewer
 is reachable from the host browser: meshcat `:7000`, matplotlib WebAgg `:8988`,
-JupyterLab `:8888`, telemetry `:9870`.
+JupyterLab `:8888`.
 
 **Visualisation.** meshcat is the default for anything 3D — three.js in the host
 browser, so no X display, no OpenGL, no rebuild. Static figures use `Agg` and are
-written to the gitignored `workspace/output/`.
+written to the gitignored `workspace/output/`. There is currently **no viewer in
+the tree**; the previous one was removed with the `piper_sdk` stack because it
+read its poses from that stack's own FK and telemetry. A new one should be built
+on `AgxPinocchio.forward_kinematics` and the URDF and meshes already in
+`agx_reference/piper/piper/`.
 
 ⚠️ **The container is not headless.** `--net=host` shares the host loopback, so a
 `DISPLAY` naming a TCP display there (`localhost:600x`, what a forwarded X session
@@ -88,7 +257,7 @@ provides) opens a native window with no mounts and no restart. Do not conclude
 `docker exec` — that only rules out the unix-socket route, which `run.sh` also
 forwards (display `:1`, not `:0`; the stale `/tmp/.X11-unix/X0` has no server).
 
-Claude usually works from the **host** shell, where `piper_sdk` is not installed.
+Claude usually works from the **host** shell, where `pyAgxArm` is not installed.
 To inspect it: `docker exec piper-ergodic bash -lc '<read-only command>'`.
 `can-utils` (`candump`, `cansend`) also lives in the container, not on the host.
 
@@ -97,21 +266,12 @@ The empty `workspace/docker_intern_PiPER_egodic` (note the typo) and
 
 ---
 
-## 5. CAN bring-up — the usual cause of "can't talk to the robot"
+## 6. CAN bring-up — the usual cause of "can't talk to the robot"
 
 `can0` is a **gs_usb** USB-CAN adapter and the kernel does **not** bring it up or
 set a bitrate. After every host reboot or re-plug it is `state DOWN`,
-`can state STOPPED`, with no `bitrate` field, and `piper.init()` then fails with
-a misleading error chain — the real cause is the first line:
-
-```
-[ERROR] [PIPER] CAN port can0 is not UP.
-ConnectionError [CAN socket 'can0' does not exist.]
-```
-
-`Piper.init()` → `C_PiperInterface_V2(judge_flag=True)` → `C_STD_CAN` →
-`JudgeCanInfo()`, which raises if the port is missing, not UP, **or** not at
-exactly 1 000 000. The PiPER expects **1 Mbit/s**, always.
+`can state STOPPED`, with no `bitrate` field. The PiPER expects **1 Mbit/s**,
+always.
 
 **Fix (user runs; needs sudo, host or container):**
 
@@ -132,17 +292,17 @@ cat /sys/class/net/can0/statistics/rx_packets   # sample twice; must increase
 ```
 
 - Interface absent → adapter unplugged or `gs_usb` not loaded.
-- Bitrate not exactly 1000000 → `JudgeCanInfo()` rejects it even when UP.
+- Bitrate not exactly 1000000 → rejected even when UP.
 - `can state BUS-OFF` → wiring or bitrate mismatch.
-- UP at the right bitrate but `rx_packets` stuck at 0 → see §6.
+- UP at the right bitrate but `rx_packets` stuck at 0 → see §7.
 
 ---
 
-## 6. CAN troubleshooting
+## 7. CAN troubleshooting
 
-A powered PiPER broadcasts feedback (`0x2A1`, `0x2A5`–`0x2A6`) continuously and
-unprompted, so `rx_packets` should climb fast on a healthy link. Zero means
-nothing is reaching the adapter, and the cause is physical.
+A powered PiPER broadcasts feedback continuously and unprompted, so `rx_packets`
+should climb fast on a healthy link. Zero means nothing is reaching the adapter,
+and the cause is physical.
 
 ⚠️ **`bus-errors` / `error-warn` / `error-pass` / `bus-off` are permanently 0 on
 this dongle** and carry no information — it does not support bus-error reporting
@@ -183,13 +343,8 @@ docker exec piper-ergodic bash -lc '
 **`tx_packets=0` with `tx_errors` climbing** is the textbook signature of no
 other node on the bus to ACK: the controller retransmits forever, the queue backs
 up into `ENOBUFS` / "No buffer space available". `cansend can0 000#` is the
-discriminating test — an ACKed frame increments `tx_packets` cleanly.
-
-The SDK shows the same fault at transmit time, not at `init()`:
-`SendCanMessage(SEND_MESSAGE_FAILED (100017))`. Per `C_STD_CAN.CAN_STATUS`,
-`100016` = sent, `100017` = bus reads healthy but `bus.send()` threw,
-`100018` = bus state itself bad. `100017` is a hardware symptom, **not** an SDK
-bug: if raw `cansend` also fails there is nothing to fix in Python.
+discriminating test — an ACKed frame increments `tx_packets` cleanly. If raw
+`cansend` also fails there is nothing to fix in Python.
 
 ### The adapter in this setup
 
@@ -229,278 +384,224 @@ insurance. A second death under the same conditions would be real evidence.
 
 ---
 
-## 7. Code layout (`workspace/src/`)
+## 8. `pyAgxArm` API notes
+
+Installed at `/usr/local/lib/python3.10/dist-packages/pyAgxArm/`. Verify
+signatures there rather than guessing. The per-firmware drivers under
+`protocols/can_protocol/drivers/piper/` carry long, accurate English docstrings —
+they are the best documentation available for this arm.
+
+Why this SDK replaced `piper_sdk`: **it scales `t_ff` to real N·m per firmware
+profile and validates the range**, raising `ValueError` instead of silently
+bit-masking an out-of-range value. A Cartesian impedance controller puts its
+entire output through `t_ff`, so both properties are load-bearing.
+
+Setup, as both demos do it:
+
+```python
+cfg = create_agx_arm_config(robot=ArmModel.PIPER,
+                            firmeware_version=PiperFW.DEFAULT,  # sic: "firmeware"
+                            channel="can0")
+robot = AgxArmFactory.create_arm(cfg)
+robot.connect()
+while not robot.enable():
+    time.sleep(1)
+```
+
+| call | notes |
+|---|---|
+| `robot.get_joint_angles()` | returns `None` until the first frame arrives; angles are `.msg`, a 6-list in rad |
+| `robot.get_motor_states(i)` | 1-indexed; `.msg.velocity` in rad/s |
+| `robot.joint_nums` | 6 |
+| `robot.move_mit(joint_index, p_des, v_des, kp, kd, t_ff)` | 1-indexed; `T_ref = kp*(p_des - p) + kd*(v_des - v) + t_ff` |
+| `robot.move_p(pose6)` | Cartesian position move; not used by the impedance demos |
+
+`move_mit` ranges and quantisation, from the driver docstring:
+
+| arg | range | step |
+|---|---|---|
+| `p_des` | ±12.5 rad | 3.81e-4 rad |
+| `v_des` | ±45.0 rad/s | 2.20e-2 rad/s |
+| `kp` | 0 … 500 | 0.122 |
+| `kd` | ±5.0 | 2.44e-3 |
+| `t_ff` | ±(8·b·c): **±32.0 N·m joints 1–3, ±6.506 N·m joints 4–6** | — |
+
+The `t_ff` limit comes from `joint_torque_b` and `joint_torque_c` in the config
+dict (`[4,4,4,1,1,1]` and `[1,1,1,0.813252,…]`), so it is inspectable at
+runtime rather than hardcoded. `kd` capping at 5.0 while `kp` runs to 500 means
+damping runs out well before stiffness does.
+
+### Joint limits
+
+Also in the config dict, as `cfg["joint_limits"]` — read them from there rather
+than retyping these numbers. Reproduced here because the doc that held them was
+deleted, and because any histogram over joint angles needs this as its support:
+
+| joint | rad | deg | note |
+|---|---|---|---|
+| 1 | −2.6180 … 2.6180 | ±150 | base yaw |
+| 2 | 0.0 … 3.1416 | 0 … 180 | **one-sided** — shoulder |
+| 3 | −2.9671 … 0.0 | −170 … 0 | **one-sided** — elbow |
+| 4 | −1.7453 … 1.7453 | ±100 | forearm roll |
+| 5 | −1.2217 … 1.2217 | ±70 | wrist pitch |
+| 6 | −2.0944 … 2.0944 | ±120 | wrist roll |
+
+⚠️ **Joints 2 and 3 are one-sided, so the all-zeros pose sits exactly on their
+limit.** Zero is still a valid pose and does not self-collide, but joint 2 can
+only travel positive and joint 3 only negative. The ranges are also very
+unequal — 300°, 180°, 170°, 200°, 140°, 240° — so anything binning or
+normalising over joint space must do it per joint.
+
+⚠️ **Torque control has no limit protection.** The firmware's soft limits act on
+*position* setpoints; nothing stops a commanded `t_ff` from driving a joint into
+its stop, and the demos run `kp = kd = 0` so the joint driver contributes no
+restoring force. A controller that generates torques must bound its own output
+and watch `q` against this table itself.
+
+**Firmware profile.** `PiperFW` offers `DEFAULT`, `V183`, `V188`, `V189`. The
+`V183` driver is documented as firmware v183–v187 = S-V1.8-3 … S-V1.8-7. **This
+arm reports S-V1.8-2, which is below that range, so `PiperFW.DEFAULT` is the
+correct profile** — checked against the driver docstrings. All three demos pass
+`DEFAULT`; `main_jnt_imp.py` arrived from upstream with `V189` and was corrected.
+If the arm is ever flashed, revisit this.
+
+For `t_ff` the profile happens not to matter: all four PIPER profiles carry
+identical `joint_torque_k/b/c`, so the scaling and the ±32 / ±6.506 N·m limits
+are the same (checked at runtime, not assumed). The version drivers do override
+other methods, so the profiles are not interchangeable in general — which is why
+matching the real firmware is still the right thing to do.
+
+### Firmware behaviour inherited from the `piper_sdk` era
+
+`pyAgxArm` frames the mode word for you, so the trap below should not be
+reachable through its API, but the firmware is unchanged and the behaviour is
+worth knowing. It was established here by experiment, not from any vendor
+document.
+
+**Three independent pieces of state:** per-joint driver enable (**persistent** —
+an arm enabled in the last run is still enabled after a restart, and it never
+times out); the mode word (CAN `0x151`); and the setpoint, which lives on a
+*different CAN ID per mode*.
+
+> **Changing the mode word invalidates the current setpoint. Supply a new one in
+> the same frame pair, or do not change the mode at all.**
+
+"Limp" is never about enable. It means the active controller has no valid
+setpoint, so the loop commands zero torque — and with no brakes (§2) the arm
+falls. A MIT setpoint is `(pos, vel, kp, kd, τ)` and a position setpoint is an
+angle for the trapezoidal interpolator; they are not interchangeable, so a mode
+change cannot carry the old one forward.
+
+**There is no command watchdog.** The arm latches its last setpoint
+indefinitely. Streaming at 200 Hz is about control quality, not about holding —
+which is why a crashed loop leaves a stale torque applied rather than dropping
+the arm (§4).
+
+---
+
+## 9. Code layout (`workspace/src/`)
 
 ```
 workspace/src/
-├── main.py                       # entry point: the hardware demo
-├── impedance_control/
-│   ├── session.py                # connect_arm(): the ONLY module importing piper_sdk
-│   ├── piper.py                  # ensure_can_mode / get_q / enable / stop / recovery
-│   ├── mit.py                    # set_mit_mode, compose_mit_targets, check_targets, send_mit
-│   ├── motion.py                 # MotionProfile, move_to(), mit2can_park(), tracking report
-│   └── telemetry.py              # UDP sender for the viewer (:9870)
-├── kinematics/                   # hardware-free; see kinematics/README.md
-│   ├── transform.py  model.py  fk.py  ik_closed.py  ik.py
-│   ├── dynamics.py               # pin.rnea feedforward, make_tau_ff_fn()
-│   ├── dh.py                     # published AgileX DH tables, as a check
-│   └── selftest.py               # every check; run with the arm unplugged
-├── visualization/                # one application: python -m visualization <mode>
-│   ├── app.py                    # the CLI: pose | ik | watch | simulate | replay
-│   ├── skeleton.py  meshcat_view.py  live_view.py
-│   ├── simulate.py               # the same trajectory code, against ...
-│   └── simulated_arm.py          # ... a stand-in for the real arm, no SDK
-├── docs/                         # executables.md, joint-limits.md
-├── print_joint_limits.py         # read-only: firmware limits vs SDK defaults
-└── test_*.py                     # scratch hardware scripts, not maintained
+└── agx_reference/              # the whole of it (§4)
+    ├── core/agx_pinocchio.py          # hardware-free: FK, Jacobian, nle, rnea
+    ├── controller/                    # hardware-free: torque laws
+    │   ├── task_imp_controller.py
+    │   └── jnt_imp_controller.py
+    └── piper/                         # TOUCHES THE ARM
+        ├── main_gc.py  main_jnt_imp.py  main_tast_imp.py
+        └── piper/{urdf,meshes}/       # its own reduced 6-DoF description
 ```
 
-**`session.py` is the offline/hardware line.** Everything else is handed the
-handles and never constructs one, which is what lets the identical control code
-run against `SimulatedArm`. If a tool imports `session.py`, it needs a robot.
+That is the entire tree. `workspace/output/` is gitignored and is where
+generated data and figures go.
 
-**Pinocchio is only a parser and a dynamics engine.** `import pinocchio` appears
-in exactly three files — `model.py` (URDF parse), `dynamics.py` (`rnea`) and
-`selftest.py` (which checks our numpy replacements against the calls they
-replaced). Do not reintroduce it elsewhere.
+**Imports.** `agx_reference` is not an installed package and has no
+`__init__.py`. Each `piper/main_*.py` puts its own parent directory on
+`sys.path` and then imports `core.…` / `controller.…`, so **they are run from
+`workspace/src/agx_reference/` as `python piper/main_gc.py`**. A new module that
+wants to import `core` or `controller` must either live beside them and be run
+the same way, or repeat that `sys.path` insertion — which is upstream's pattern,
+so follow it rather than converting the tree into a package.
 
-**`mit2can_park()`'s handover target is a hardcoded `JointCtrl(0, ...)`**, so
-`q_park` is expected to be the zero pose. It travels there with `move_to()`
-first — a one-shot MIT setpoint leaves the whole distance to the position error,
-which a soft `kp` never quite closes, so MOVE J inherited the remainder as one
-swing. Read §9 before touching it.
+⚠️ **Nothing in the tree is linted any more.** `pyproject.toml` excludes
+`agx_reference` from ruff (hard rule 3), and it is now the only code, so
+`ruff check workspace/src` reports "no Python files found". That protects the
+upstream files from being reformatted by the `.claude/hooks/quality-gate.sh`
+PostToolUse hook, but it also means new code added inside `agx_reference` gets no
+lint or format pass. Worth deciding deliberately when the tree next grows: either
+keep new work in a sibling directory that *is* linted, or accept the gap.
 
-**Visualisation is one application**, not a script per purpose. New views become
-modes of `python -m visualization`, not new entry points.
-
-Modules import as a plain package relative to `workspace/src`, so **scripts must
-be run with `workspace/src` as the working directory**. New modules go in a
-subfolder with an `__init__.py`.
-
-The `test_*.py` scripts are scratch/history. They may break when
-`impedance_control/` is refactored — do not spend edits keeping them importable.
-⚠️ `test_ctrlPiperJoint_mit_can0_multi.py` leaves MIT with a plain
-`move_j(current, v)`, which sends byte 3 as `0x00` and leaves the arm **limp**.
-Do not copy that exit; see §9.
-
-### `main.py`
-
-Connects, reports the startup state, enters MIT at the current pose, walks a
-list of targets with `move_to()`, and always exits through `mit2can_park()` in
-its `finally:`. Telemetry is always on — an unread datagram is dropped by the
-kernel, so a viewer can be attached or killed mid-run.
-
-`ensure_can_mode()` makes startup deliberately asymmetric:
-
-- **Clean state** (`all(GetArmEnableStatus())` and `ctrl_mode == 1`, i.e. what
-  `mit2can_park()` leaves) → sends **nothing**. The first mode frame is
-  `send_mit()`'s, which carries `0xAD`, so byte 3 never flips.
-- **Anything else** (crash, power-cycle, teaching button) → `reset_from_mit()`
-  if the drivers are off, then `teaching2can_mode()`. This path drops the arm,
-  deliberately. `arm_status` in the startup print names the fault.
-
-Gains live in one `TUNING` table keyed by joint. The joint driver runs
-
-```
-tau = kp * (q - q_meas) + kd * (qdot_ref - qdot_meas) + tau_ff
-```
-
-so steady-state sag is `gravity_torque / kp`: raising `kp` stiffens the arm,
-whereas putting the gravity-hold torque in `tau_ff` removes the sag while
-leaving it compliant — which is what a contact task wants, and is why
-`make_tau_ff_fn()` exists. `qdot_ref` stays 0 for a step-and-hold, but a
-streamed trajectory must carry each joint's desired velocity or `kd` drags
-against the motion and the joint lags by roughly `kd * qdot_des / kp`.
-
-On-wire quantisation, worth knowing while tuning
-(`piper_interface_v2.py:3062-3066`): `tau_ff` is 8 bits over ±18 Nm (0.14 Nm
-steps), and `kd` is capped at 5.0 while `kp` runs to 500 — damping runs out well
-before stiffness does.
-
----
-
-## 8. `piper_sdk` 1.0.0 API notes
-
-Installed at `/usr/local/lib/python3.10/dist-packages/piper_sdk/`. Verify
-signatures there rather than guessing; the API changed between versions and much
-of the docstring text is Chinese with an English block below. Vendor demos for
-other features are in `piper_sdk/demo/V2/`.
-
-Two layers: `Piper` (`api/piper_api.py`, high level, radians, singleton **per CAN
-name** — a second `Piper("can0")` returns the same object with `__init__`
-skipped) and `C_PiperInterface_V2` (`interface/piper_interface_v2.py`, raw
-frames, returned by `Piper.init()`). **MIT control only exists on the low level.**
-
-Startup order matters, and is in `session.connect_arm()`:
-`init_soft_joint_limit_on()` **before** `init()` (which snapshots the flags),
-then `connect()` — until that runs, `get_joint_states()` returns all zeros and
-merely logs "Read thread not opened".
-
-| Call | Notes |
-|---|---|
-| `piper.get_joint_states()` | `((j1..j6 rad), time_stamp, Hz)` — take `[0]` |
-| `piper.get_gripper_states()` | `((angle, effort), time_stamp, Hz)` |
-| `piper.move_j(joints_rad_6tuple, v_int_0_100)` | refuses in Teaching mode; needs all joints enabled |
-| `piper.enable_arm()` / `disable_arm()` | `disable_arm()` also sends `EmergencyStop(0x02)` |
-| `interface.ModeCtrl(ctrl_mode, move_mode, move_spd_rate_ctrl, is_mit_mode)` | see below |
-| `interface.JointMitCtrl(motor_num, pos_ref, vel_ref, kp, kd, t_ref)` | CAN IDs 0x15A–0x15F |
-| `interface.GetArmStatus().arm_status.ctrl_mode` | vs `ArmMsgFeedbackStatusEnum.CtrlMode` |
-
-`ModeCtrl` arguments: `ctrl_mode` `0x00` standby / `0x01` CAN control;
-`move_mode` `0x00` P, `0x01` J, `0x02` L, `0x03` C (feedback also reports `0x04`
-MOVE M, `0x05` CPV); `move_spd_rate_ctrl` 0–100 %; `is_mit_mode` `0x00`
-position/velocity, `0xAD` MIT, `0xFF` invalid.
-
-`JointMitCtrl` ranges (SDK docstring): `motor_num` 1–6, `pos_ref` ±12.5 rad,
-`vel_ref` ±45.0 (vendor uses 0.0), `kp` 0–500 (vendor 10), `kd` ±5.0 (vendor
-0.8), `t_ref` ±18.0 Nm (vendor 0.0). This project runs far gentler than the
-vendor reference.
-
-⚠️ `FloatToUint()` (`protocol/piper_protocol_base.py:382`) does **not** clamp —
-it scales, truncates and bit-masks, so an out-of-range gain reaches the joint as
-a plausible-looking wrong value instead of erroring. That is why
-`mit.check_targets()` exists.
-
-`ArmMsgFeedbackStatusEnum.CtrlMode`: `STANDBY=0x00`, `CAN_CTRL=0x01`,
-`TEACHING_MODE=0x02`, `ETHERNET=0x03`, `WIFI=0x04`, `REMOTE=0x05`,
-`LINKAGE_TEACHING_INPUT=0x06`, `OFFLINE_TRAJECTORY=0x07`. `ArmStatus` carries
-`EMERGENCY_STOP`, `TARGET_POS_EXCEEDS_LIMIT`, `JOINT_COMMUNICATION_ERR`,
-`JOINT_BRAKE_NOT_RELEASED`, `COLLISION_OCCURRED`.
-
----
-
-## 9. The 0x151 mode word: why the arm goes limp
-
-The central operating principle of this codebase. Three separate bugs had this
-same root cause, and each presented as "the arm went limp".
-
-**Three independent pieces of state**, not to be conflated:
-
-1. **Driver enable** — per joint, `driver_enable_status` in 0x261–0x266, set by
-   0x471. **Persistent**: an arm enabled in the last run is still enabled after
-   a restart (`double_PiPER/README(EN).md:118-120`). It never times out.
-2. **The mode word** — CAN 0x151, six bytes.
-3. **The setpoint** — on a *different CAN ID per mode*: 0x155–0x157
-   (`JointCtrl`, angles), 0x15A–0x15F (`JointMitCtrl`), 0x152–0x154
-   (`EndPoseCtrl`).
-
-**"Limp" is never about enable.** It means the active controller has no valid
-setpoint, so the loop commands zero torque — and with no brakes (§2) the arm
-falls.
-
-Two bytes matter. Byte 1 `move_mode` selects **where the setpoint comes from**
-(MOVE J reads 0x155–0x157, MOVE M reads 0x15A–0x15F). Byte 3 `is_mit_mode`
-selects **which low-level controller runs** (`0x00` position-velocity, `0xAD`
-MIT). Byte 3 is the dangerous one, and it is **write-only** — 0x2A1 echoes byte
-1 as `mode_feed` but nothing echoes byte 3, which is why this was hard to find:
-`mode_feed: 1` reports MIT as cleared while the invisible byte does the damage.
-
-> **The rule: changing the mode word invalidates the current setpoint. Supply a
-> new one in the same frame pair, or do not change the mode at all.**
-
-A target stored under MOVE M is `(pos, vel, Kp, Kd, τ)`; under MOVE J it is an
-angle for the trapezoidal interpolator. They are not interchangeable, so a mode
-change cannot carry the old setpoint forward. Corollary: **a bare `ModeCtrl`
-with no `JointCtrl` / `JointMitCtrl` behind it is always a bug.**
-
-| sent | byte 1 | byte 3 | target? | result |
-|---|---|---|---|---|
-| `mit2can_mode()` spam *(deleted)* | 0x04→0x01 | 0xAD→0x00 | **no** | limp |
-| single `move_j` out of MIT | 0x04→0x01 | 0xAD→**0x00** | yes | limp |
-| `mit2can_park()` | 0x04→0x01 | 0xAD→**0xAD** | yes | **holds** |
-| `test_ctrlPiperJoint_can0.py` *(deleted)* | unchanged | unchanged | streamed | **holds** |
-| startup `enable()`'s `ModeCtrl` | 0x01→0x01 | 0xAD→**0x00** | **no** | limp **+ wedged** |
-
-Rows 2 and 3 are the controlled experiment, identical but for byte 3. Row 4 is
-the control proving there is **no command watchdog**: it exits with no cleanup
-and the arm keeps holding, because it never changed the mode word. Row 5 is the
-worst case — byte 1 never moved, so nothing *looked* like a mode switch, but the
-controller was swapped under an actively holding arm with no target behind it.
-That latches a fault, drops all six enable bits, and the arm then ignores
-everything until teaching mode is toggled with the physical button.
-
-**Consequences here:** `mit2can_park()` keeps byte 3 at `0xAD` and moves only
-byte 1, with `JointCtrl` immediately behind — the vendor's own
-`handle_go_zero_service` pattern, whose `is_mit_mode` flag exists precisely so
-the caller can say which controller is running. `ensure_can_mode()` sends
-nothing in the clean state. So the whole program runs at byte 3 = `0xAD`
-throughout: first MIT command → park → next run's startup. Only byte 1 ever
-moves, always with a target behind it. `reset_from_mit()` is the vendor's
-documented MIT exit but goes through STANDBY, dropping the drivers and needing
-two re-enables — **recovery, not shutdown**.
-
-**Documented:** the byte layout; `0x04` MOVE M and `0xAD` as the MIT settings;
-that `mode_feed` echoes byte 1 and nothing echoes byte 3; that enable persists
-across exit; that the reset path passes through standby. **Inferred from
-hardware results, not any vendor document:** the setpoint-invalidation rule, the
-byte-1-source / byte-3-controller split, and that a byte-3 swap latches the
-fault. That is the simplest model fitting all five observations and it has
-predicted two fixes — but it is a model, not a spec. If a future transition
-contradicts it, the model is what is wrong.
-
-Untested prediction, if anyone wants to confirm it: flipping byte 3 `0xAD` →
-`0x00` **with** a `JointCtrl` behind it, from a non-MIT MOVE J hold. This model
-says it still goes limp; a plain "mode frames need targets" rule says it holds.
-
----
+**Proving numerical code.** `controller/` and `core/` import no SDK, so any
+torque law, FK call or analysis of recorded data can be checked with the arm
+unplugged, and should be: correctness is proved by a command, not by inspection.
+The deleted `kinematics/selftest.py` is the template worth imitating — it
+cross-checked FK and the Jacobian against Pinocchio, and round-tripped 5000
+random poses — and it is in git history if you want to read it. For a new
+numerical function, compare against an independent computation (an analytic
+result, a finite difference, a round trip), never against a value just printed
+and pasted in.
 
 ## 10. Operating notes & gotchas
 
-- **Teaching mode blocks everything.** `ctrl_mode` reads `0x02`, `move_j`
-  silently refuses, and the arm must go through the `stop()` / re-enable
-  handshake in `teaching2can_mode()`.
-- **Enter MIT at the current pose.** `send_mit` with a `q0` read one moment
-  earlier means near-zero position error at the switch; a distant target
-  produces a violent jump.
-- **Leave MIT with `mit2can_park()`, never a plain `move_j`** (§9).
-- **MIT is a streaming interface.** Real impedance control needs the command
-  re-sent at ~100–200 Hz; `move_to()` does this. That is about control quality,
-  not holding — the arm latches its last setpoint indefinitely and there is no
-  watchdog (§9).
-- **`Kp = Kd = 0` means a limp arm** that will fall. Never suggest zero gains on
-  a mounted arm without support.
-- **1-indexed joints everywhere.** `JointMitCtrl` takes `motor_num` 1–6 and
-  `get_q()` returns a dict keyed the same way, so `base[joint - 1]` appears only
-  once, inside `get_q()`. Anything reading `piper.get_joint_states()` directly
-  is still a 0-indexed tuple.
-- **If the drivers report `enable=[False]*6`**, recover by toggling teaching
-  mode and back with the physical button, not by power-cycling.
-- ⚠️ **`stop()`'s safety condition cannot always be satisfied.** Its wait loop
-  came verbatim from the vendor demo:
-  1. The wait is bounded by `timeout` (default 10 s); on expiry it warns and
-     disables anyway. Not a new hazard — `EmergencyStop(0x01)` at the top has
-     already removed torque, so the arm is descending under damping throughout.
-  2. The joint-5 test is a one-sided band, not a tolerance: it needs
-     `0.2094 < q5 < 0.7854`, so an arm settling near neutral or negative on
-     joint 5 can never pass. The joint-2 and joint-3 tests do behave like
-     tolerances.
-  3. **Joint 4 is never checked; joint 5 is checked twice** — a transcription
-     slip in the vendor demo, deliberately preserved. Flag it before changing it.
-
-  `stop()` is only reached from the recovery path, so a normal run never hits it.
-- `piper_sdk` writes logs into its own installed package directory; the
-  Dockerfile chowns `piper_sdk/log` so this works non-root.
+- **Enter any impedance or torque mode at the current pose.** Read `q` one
+  moment earlier so the position error at the switch is near zero; a distant
+  target produces a violent jump.
+- **`kp = kd = t_ff = 0` means a limp arm** that will fall. Never suggest it on
+  a mounted arm without support. Note the demos run `kp = kd = 0` deliberately
+  and are safe only because `t_ff` carries the full gravity torque every cycle.
+- **Torque-only control has no joint-limit protection** (§8). Any new
+  controller must bound its own output and check `q` itself.
+- **Teaching mode blocks everything.** If the arm ignores commands, check it is
+  not in teaching mode (physical button).
+- **If the drivers report all six joints disabled**, recover by toggling
+  teaching mode and back with the physical button, not by power-cycling.
+- **1-indexed joints at the SDK boundary.** `move_mit` and `get_motor_states`
+  take 1–6, while `get_joint_angles().msg` is a 0-indexed 6-list. The demos
+  write `tau[joint_id - 1]`; keep that conversion in one place.
+- **Units are radians and metres** everywhere, in printed output and
+  command-line arguments as well as in code.
+- **Rotations come in two flavours here.** `agx_reference` uses `pin.SE3` /
+  Pinocchio rotation matrices internally and `scipy.spatial.transform.Rotation`
+  at its edges (`R.from_euler` for the base orientation). Pick one per function
+  and convert at the boundary rather than mixing types mid-computation.
+- **`get_joint_angles()` returns `None` until the first CAN frame arrives**, so
+  every loop waits for it before starting. A recorder must not treat that first
+  `None` as a sample.
 
 ---
 
 ## 11. Typical workflow
 
 ```bash
-# host, once per boot / re-plug — user runs (see §5)
+# host, once per boot / re-plug — user runs (see §6)
 sudo ip link set can0 down && sudo ip link set can0 type can bitrate 1000000 && sudo ip link set can0 up
 
 sh run.sh                      # start the container (or attach from VS Code)
 cd /home/jens/workspace/docker_intern_PiPER_ergodic/workspace/src
 ```
 
-Hardware-free, and to be run before any hardware run:
+Hardware-free, safe for Claude to run — the controllers and the Pinocchio
+wrapper import no SDK, so a torque law or an analysis script can be exercised
+with the arm unplugged:
 
 ```bash
-python -m kinematics.selftest                          # every model check
-python -m visualization watch                          # shell 1: viewer + telemetry
-python -m visualization simulate --target ready        # shell 2: the motion, no arm
+cd workspace/src/agx_reference
+python -c "from controller.task_imp_controller import CartesianImpedanceController"
 ```
 
-Then the user — never Claude — runs `python main.py`.
-`workspace/src/docs/executables.md` has the full set, both pipelines and every
-option.
+Then the user — never Claude — runs one of:
+
+```bash
+cd workspace/src/agx_reference
+python piper/main_gc.py                        # pure gravity compensation
+python piper/main_jnt_imp.py                   # joint impedance hold
+python piper/main_tast_imp.py                  # Cartesian impedance hold
+```
+
+All three run until Ctrl-C, which hands the arm to a position hold (§4).
+
+A useful sanity check that needs no arm: both controllers must reduce to pure
+gravity compensation when the error is zero. At the zero pose that is
+`[0, 3.188, -2.807, -0.011, -0.235, 0]` N·m, and the flange sits at
+`[0.0561, 0, 0.2132]` m.
