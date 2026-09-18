@@ -19,7 +19,7 @@ def main():
     urdf_path = str(PROJECT_ROOT / "piper" / "piper" / "urdf" / "piper_description.urdf")
 
     # 控制频率
-    control_frequency = 200.0
+    control_frequency = 100.0
 
     # 初始化机械臂接口
     cfg = create_agx_arm_config(
@@ -59,12 +59,16 @@ def main():
     )
 
     # 关节力矩权重
-    joint_torque_weights = np.array([1.0, 1.0, 1.0, 0.5, 1.0, 0.5], dtype=float)
+    joint_torque_weights = np.array([1.0, 1.0, 1.0, 0.5, 0.5, 0.5], dtype=float)
     controller.set_joint_torque_weights(joint_torque_weights)
 
     # 笛卡尔空间阻尼/刚度（[x,y,z,rx,ry,rz]）
     b = np.array([5.0, 5.0, 5.0, 0.2, 0.2, 0.2], dtype=float)
-    k = np.array([200.0, 200.0, 200.0, 5.0, 5.0, 5.0], dtype=float)
+    k = np.array([200.0, 100.0, 100.0, 5.0, 5.0, 5.0], dtype=float)
+
+    print(b)
+    print(k)
+
     if b.shape[0] != 6 or k.shape[0] != 6:
         raise ValueError("笛卡尔阻抗参数 b/k 长度必须为6")
 
