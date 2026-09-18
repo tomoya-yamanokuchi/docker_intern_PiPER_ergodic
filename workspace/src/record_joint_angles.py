@@ -29,8 +29,8 @@ URDF_PATH = (
 )
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output"
 
-REC_FREQ_HZ = 20.0
-CONTROL_FREQ_HZ = 200.0
+REC_FREQ_HZ = 100.0
+CONTROL_FREQ_HZ = 100.0
 
 
 def main() -> None:
