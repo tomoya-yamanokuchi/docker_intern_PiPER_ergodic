@@ -184,4 +184,34 @@
         <axis xyz="0 0 1"/>
         <limit lower="-2.0943951" upper="2.0943951" effort="100" velocity="5"/>
     </joint>
+    <!-- Peg end effector. The STL is in mm, its base on the flange face and its
+         axis along link6 z. No inertial: its mass is not known. -->
+    <link name="peg">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="meshes/peg.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="dark_grey">
+                <color rgba="0.1 0.1 0.1 1"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="meshes/peg.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+        </collision>
+    </link>
+    <joint name="link6_to_peg" type="fixed">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <parent link="link6"/>
+        <child link="peg"/>
+    </joint>
+    <link name="peg_tcp"/>
+    <joint name="peg_to_peg_tcp" type="fixed">
+        <origin xyz="0 0 0.06" rpy="0 0 0"/>
+        <parent link="peg"/>
+        <child link="peg_tcp"/>
+    </joint>
 </robot>
