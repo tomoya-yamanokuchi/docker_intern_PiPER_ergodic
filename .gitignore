@@ -130,6 +130,11 @@ recordings/
 bags/
 *.bag
 
+# Kept demonstrations and the figures made from them: regenerable from the arm
+# and from the code, so out of history like everything else in output/.
+workspace/saved_recordings/
+workspace/plots/
+
 
 # ============================================================
 # Optional model / checkpoint files
