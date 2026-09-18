@@ -47,6 +47,7 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     python3-tk \
     python-is-python3 \
+    liblapack-dev \
     can-utils \
     iproute2 \
     ethtool \
