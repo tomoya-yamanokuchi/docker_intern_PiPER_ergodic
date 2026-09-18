@@ -11,6 +11,11 @@ import numpy as np
 
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 
+# Half-width of the central differences below. Wide enough that the step noise of
+# the recorded q does not dominate the second derivative, narrow enough to keep
+# the operator's own accelerations.
+DERIVATIVE_STEP_S = 0.05
+
 
 @dataclass
 class JointAnglePlayer:
@@ -40,3 +45,17 @@ class JointAnglePlayer:
     def joint_angles_at(self, t: float) -> np.ndarray:  # (6,) rad
         """Linear interpolation per joint; held at the first/last sample outside [0, duration]."""
         return np.array([np.interp(t, self.t, q_j) for q_j in self.q.T])
+
+    def joint_velocities_at(self, t: float) -> np.ndarray:  # (6,) rad/s
+        """Central difference of joint_angles_at over DERIVATIVE_STEP_S."""
+        h = DERIVATIVE_STEP_S
+        return (self.joint_angles_at(t + h) - self.joint_angles_at(t - h)) / (2.0 * h)
+
+    def joint_accelerations_at(self, t: float) -> np.ndarray:  # (6,) rad/s^2
+        """Second central difference of joint_angles_at over DERIVATIVE_STEP_S."""
+        h = DERIVATIVE_STEP_S
+        return (
+            self.joint_angles_at(t + h)
+            - 2.0 * self.joint_angles_at(t)
+            + self.joint_angles_at(t - h)
+        ) / h**2
