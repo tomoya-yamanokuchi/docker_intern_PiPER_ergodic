@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Replay the newest joint-angle recording under Cartesian impedance control.
+"""Replay a joint-angle recording under Cartesian impedance control.
 
-The loop is agx_reference/piper/main_tast_imp.py with its gains; the only change
-is that the Cartesian target moves, set each cycle to the flange pose of the
-recorded q at that time. It first approaches the recording's start pose from the
+The loop is agx_reference/piper/main_tast_imp.py with its gains, except that the
+Cartesian target moves, set each cycle to the flange pose of the recorded q at
+that time, and that the inertial and friction torque of the recorded motion is
+fed forward on top. It first approaches the recording's start pose from the
 current one, and after the last sample it holds the final pose until Ctrl-C,
 which hands the arm to a position hold.
 
-Run from workspace/src:  python play_joint_angles.py
+Run from workspace/src:  python play_joint_angles.py recording.npz
 """
 
+import argparse
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
+from controller.feed_forward import FeedForward
 from controller.task_imp_controller import CartesianImpedanceController
 from direct_teaching.player.joint_angle_player import JointAnglePlayer
 from direct_teaching.player.tracking_error import (
@@ -51,12 +54,12 @@ def make_controller(dofs: int) -> CartesianImpedanceController:
     return controller
 
 
-def main() -> None:
-    recording = sorted(OUTPUT_DIR.glob("joint_angles_*.npz"))[-1]
+def main(recording: Path) -> None:
     robot = connect_arm()
     joint_angles = np.array(robot.get_joint_angles().msg)
 
     controller = make_controller(robot.joint_nums)
+    feed_forward = FeedForward(urdf_path=str(URDF_PATH), dofs=robot.joint_nums)
     player = JointAnglePlayer.load(recording, q_start=joint_angles)
 
     R_world_base = R.from_euler("xyz", [0, 0, 0], degrees=True).as_matrix()
@@ -73,7 +76,7 @@ def main() -> None:
             t = start_time - t0
 
             joint_angles = run_control_cycle(
-                robot, controller, player.joint_angles_at(t), R_world_base
+                robot, controller, feed_forward, player, t, R_world_base
             )
             log.append((t, joint_angles))
 
@@ -95,19 +98,29 @@ def main() -> None:
 def run_control_cycle(
     robot,
     controller: CartesianImpedanceController,
-    q_target: np.ndarray,  # (6,) rad
+    feed_forward: FeedForward,
+    player: JointAnglePlayer,
+    t: float,  # s since the loop started
     R_world_base: np.ndarray,  # (3, 3)
 ) -> np.ndarray:  # (6,) rad, the q the torque was computed from
-    """Read the state, send the torque pulling the flange to FK(q_target)."""
+    """Read the state, send the torque pulling the flange to FK(player at t)."""
     joint_angles = np.array(robot.get_joint_angles().msg)
     joint_velocities = read_joint_velocities(robot)
-    x_target, r_target = controller.pin_model.forward_kinematics(q_target, EE_FRAME_NAME)
+    x_target, r_target = controller.pin_model.forward_kinematics(
+        player.joint_angles_at(t), EE_FRAME_NAME
+    )
     cmd_torque = controller.compute_cartesian_torque(
         desired_pos=x_target,
         desired_ori=r_target,
         q_cur=joint_angles,
         v_cur=joint_velocities,
         base_orientation=R_world_base,
+    )
+    cmd_torque = cmd_torque + feed_forward.compute_torque(
+        q_cur=joint_angles,
+        qd_cur=joint_velocities,
+        qd_des=player.joint_velocities_at(t),
+        qdd_des=player.joint_accelerations_at(t),
     )
     apply_joint_torques(robot, cmd_torque)
     return joint_angles
@@ -130,4 +143,8 @@ def save_tracking_error(
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    # Mandatory: the arm replays whatever recording this is, so never pick one implicitly.
+    parser.add_argument("recording", type=Path, help="joint_angles_*.npz")
+    args = parser.parse_args()
+    main(args.recording)
