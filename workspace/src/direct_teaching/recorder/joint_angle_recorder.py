@@ -44,7 +44,29 @@ class JointAngleRecorder:
         np.savez(path, t=np.array(self._t), q=np.array(self._q).reshape(-1, 6))
 
 
+# Largest joint deviation, rad, still counted as the dwell pose. The encoders
+# report a still arm as exactly repeated values, so this only needs to be small.
+DWELL_TOL = 1e-3
+
+
+def trim_dwell(t: np.ndarray, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Drop the stationary samples at both ends, keeping the last still one before
+    the motion and the first still one after it. t restarts at 0.
+
+    The operator walks to the arm after starting and away before stopping, so
+    both ends sit at one pose that is not part of the demonstration.
+    """
+    left_start = np.max(np.abs(q - q[0]), axis=1) > DWELL_TOL
+    left_end = np.max(np.abs(q - q[-1]), axis=1) > DWELL_TOL
+    if not left_start.any():
+        raise ValueError("recording never leaves its first pose")
+    first = int(np.argmax(left_start)) - 1
+    last = len(q) - int(np.argmax(left_end[::-1]))
+    return t[first : last + 1] - t[first], q[first : last + 1]
+
+
 def load_recording(path: Path) -> tuple[np.ndarray, np.ndarray]:
-    """Return (t (N,) s, q (N, 6) rad) from a file written by JointAngleRecorder.save."""
+    """Return (t (N,) s, q (N, 6) rad) from a file written by JointAngleRecorder.save,
+    with the dwell at both ends trimmed."""
     with np.load(path) as data:
-        return data["t"], data["q"]
+        return trim_dwell(data["t"], data["q"])
