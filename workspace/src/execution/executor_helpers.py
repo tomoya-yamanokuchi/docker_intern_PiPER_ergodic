@@ -34,6 +34,15 @@ def read_joint_velocities(robot) -> np.ndarray:  # (6,) rad/s
 
 
 def apply_joint_torques(robot, tau: np.ndarray) -> None:  # tau (6,) N·m
+    cfg = robot.get_config()
+    # The SDK clamps t_ff to 8*b*c and carries on; a clamped joint has lost its
+    # damping and oscillates at the limit, so stop instead and let the caller hold.
+    t_ff_limit = 8.0 * np.array(cfg["joint_torque_b"]) * np.array(cfg["joint_torque_c"])
+    if np.any(np.abs(tau) > t_ff_limit):
+        raise RuntimeError(
+            f"torque limit exceeded: tau = {np.round(tau, 3)} N·m, "
+            f"limit = ±{np.round(t_ff_limit, 3)} N·m"
+        )
     try:
         for joint_id in range(1, robot.joint_nums + 1):
             robot.move_mit(joint_id, 0, 0, 0, 0, tau[joint_id - 1])
