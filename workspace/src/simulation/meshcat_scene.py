@@ -14,7 +14,7 @@ from pinocchio.visualize import MeshcatVisualizer
 PDF_OPACITY = 0.3
 
 
-def _draw_axes(viewer: meshcat.Visualizer, length: float, radius: float) -> None:  # m
+def draw_axes(viewer: meshcat.Visualizer, length: float, radius: float) -> None:  # m
     """RGB axes as cylinders; WebGL ignores line width, so a triad cannot be made thicker."""
     # A meshcat cylinder lies along its own y axis, centred on the origin.
     axes = (
@@ -27,13 +27,12 @@ def _draw_axes(viewer: meshcat.Visualizer, length: float, radius: float) -> None
         viewer[name].set_transform(tf.translation_matrix(offset) @ rotation)
 
 
-def draw_position_distribution(
+def draw_pdf_cloud(
     viewer: meshcat.Visualizer,
     pdf_p: np.ndarray,  # (M, 3) m, drawn from the pdf
     log_density: np.ndarray,  # (M,)
-    p_samples: np.ndarray,  # (N, 3) m
 ) -> None:
-    """Draws from the pdf coloured by log density, and the recorded flange positions in black."""
+    """Draws from the pdf, coloured by log density."""
     span = np.ptp(log_density)
     color = colormaps["viridis"]((log_density - log_density.min()) / span)[:, :3]
     viewer["distribution/position"].set_object(
@@ -42,6 +41,16 @@ def draw_position_distribution(
     # PointsMaterial takes no opacity; the viewer's "color" property sets it, and a white
     # material colour leaves the per-point colours unchanged.
     viewer["distribution/position"].set_property("color", [1.0, 1.0, 1.0, PDF_OPACITY])
+
+
+def draw_position_distribution(
+    viewer: meshcat.Visualizer,
+    pdf_p: np.ndarray,  # (M, 3) m, drawn from the pdf
+    log_density: np.ndarray,  # (M,)
+    p_samples: np.ndarray,  # (N, 3) m
+) -> None:
+    """Draws from the pdf coloured by log density, and the recorded flange positions in black."""
+    draw_pdf_cloud(viewer, pdf_p, log_density)
     viewer["distribution/samples"].set_object(
         g.PointCloud(
             p_samples.T.astype(np.float32), np.zeros_like(p_samples.T, np.float32), size=0.001
@@ -76,7 +85,7 @@ def show_robot(
     robot_view.display(q)
     tcp_data = robot.model.createData()
     pin.framesForwardKinematics(robot.model, tcp_data, q)
-    _draw_axes(viewer["tcp"], length=0.05, radius=0.002)
+    draw_axes(viewer["tcp"], length=0.05, radius=0.002)
     viewer["tcp"].set_transform(tcp_data.oMf[robot.model.getFrameId(tcp_frame)].homogeneous)
     return robot_view
 

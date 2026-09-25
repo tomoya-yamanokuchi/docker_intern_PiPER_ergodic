@@ -5,6 +5,8 @@ recording, or the newest one in workspace/output/ if none is given.
 """
 
 import argparse
+import threading
+import time
 from pathlib import Path
 
 import matplotlib
@@ -20,7 +22,9 @@ from ergodic_controller.ergodic_controller import ErgodicController
 from kinematics.kinematic_solver import KinematicSolver
 from simulation.meshcat_scene import (
     animate_robot,
+    draw_axes,
     draw_joint_sweeps,
+    draw_pdf_cloud,
     draw_position_distribution,
     draw_tcp_paths,
     show_robot,
@@ -35,6 +39,10 @@ URDF_PATH = SRC / "agx_reference/piper/piper/urdf/piper_description.urdf"
 OUTPUT_DIR = SRC.parent / "output"
 
 PDF_POINTS = 5000
+# LiveView frames between one trail point and the next; the trail is resent whole.
+TRAIL_DECIMATION = 5
+# How long LiveView's drawing thread waits when the caller has handed it nothing.
+IDLE_POLL_PERIOD = 0.005  # s
 POSITION_DIMS = [0, 1, 2]
 ORIENTATION_DIMS = [3, 4, 5]
 LABELS = [f"$X_{i + 1}$ [{unit}]" for i, unit in enumerate(["m"] * 3 + ["rad"] * 3)]
@@ -217,6 +225,96 @@ def _plot_cube_axes(t: np.ndarray, X: np.ndarray, distribution: PoseDistribution
     for ax in axes[-1]:
         ax.set_xlabel("t [s]")
     axes[0, 0].set_xlim(t[0], t[-1])
+
+
+def _homogeneous(p: np.ndarray, R: np.ndarray) -> np.ndarray:  # (3,) m, (3, 3) -> (4, 4)
+    transform = np.eye(4)
+    transform[:3, :3] = R
+    transform[:3, 3] = p
+    return transform
+
+
+class LiveView:
+    """The scene of a run as it happens: the distribution, the arm, the newest setpoint.
+
+    Everything static is drawn in __init__, which is why it is built before the arm
+    is connected: the pdf cloud of the distribution being explored, and the URDF
+    meshes at the zero pose, which jump to the measured pose on the first update.
+
+    A frame draws the arm at the measured q, its TCP triad, and a longer triad at
+    the commanded pose, so a tracking error is the gap between the two triads. The
+    trails behind them -- measured in black, commanded in red -- are what shows
+    coverage of the cloud while the run is still going.
+
+    **No drawing happens in the caller's thread.** update() only stores the newest
+    state; a daemon thread draws it. A MeshCat message is a zmq round trip to the
+    server process, and one costs about 10 ms when the calls are a control loop's
+    50 ms apart -- a full control period, though the same call costs under 1 ms
+    when they come back to back and the server is hot. So the sends go to a thread,
+    which is safe to do because pyzmq drops the GIL while it blocks. That is also
+    why the view owns its own AgxPinocchio: robot.data is mutable scratch space that
+    the controller writes on every control cycle.
+
+    A trail is resent whole, so it is appended to and redrawn only every
+    TRAIL_DECIMATION-th frame; coverage does not need the full rate to be legible.
+    """
+
+    def __init__(
+        self,
+        distribution: PoseDistribution,
+        urdf_path: Path = URDF_PATH,
+        frame_name: str = "peg_tcp",
+    ):
+        self.pin_model = AgxPinocchio(str(urdf_path))
+        self.frame_name = frame_name
+        self.measured: list[np.ndarray] = []
+        self.commanded: list[np.ndarray] = []
+        self.frames = 0
+        # The newest state update() has handed over, or None once it is drawn.
+        self.pending: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+        self.viewer = meshcat.Visualizer()
+        print(f"meshcat: {self.viewer.url()}")
+        rng = np.random.default_rng(0)
+        points = _sample_marginal(distribution, POSITION_DIMS, PDF_POINTS, rng)
+        log_density = np.log10(distribution.marginal_pdf(points, POSITION_DIMS))
+        draw_pdf_cloud(
+            self.viewer, _cube_to_physical(distribution, points, POSITION_DIMS), log_density
+        )
+        self.robot_view = show_robot(self.viewer, self.pin_model.robot, np.zeros(6), frame_name)
+        draw_axes(self.viewer["target"], length=0.08, radius=0.002)
+        threading.Thread(target=self._draw_pending, daemon=True).start()
+
+    def update(
+        self,
+        q: np.ndarray,  # (6,) rad, measured
+        p_target: np.ndarray,  # (3,) m, commanded this cycle
+        R_target: np.ndarray,  # (3, 3), commanded this cycle
+    ) -> None:
+        """Hand the newest state to the drawing thread. Stores one tuple, draws nothing."""
+        self.pending = (q, p_target, R_target)
+
+    def _draw_pending(self) -> None:
+        """Draw whatever update() last handed over, as fast as the sends allow.
+
+        Only the newest state is ever wanted, so a state overwritten before this
+        thread picks it up is simply skipped, as is one written into the gap between
+        the read and the clear below. A dropped frame of a viewer is invisible.
+        """
+        while True:
+            pending, self.pending = self.pending, None
+            if pending is None:
+                time.sleep(IDLE_POLL_PERIOD)
+                continue
+            q, p_target, R_target = pending
+            p, rotation = self.pin_model.forward_kinematics(q, self.frame_name)
+            self.robot_view.display(q)
+            self.viewer["tcp"].set_transform(_homogeneous(p, rotation))
+            self.viewer["target"].set_transform(_homogeneous(p_target, R_target))
+            self.frames += 1
+            if self.frames % TRAIL_DECIMATION == 0:
+                self.measured.append(p)
+                self.commanded.append(p_target)
+                draw_tcp_paths(self.viewer, np.array(self.measured), np.array(self.commanded))
 
 
 class Visualizer:
