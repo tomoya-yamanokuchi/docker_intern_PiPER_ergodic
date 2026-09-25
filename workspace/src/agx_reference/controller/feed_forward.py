@@ -73,8 +73,8 @@ GRAVITY_SCALE = np.array([1.0, 1.078, 1.0, 1.0, 1.0, 1.0])  # (6,) x the modelle
 
 FRICTION_VISCOUS = np.zeros(6)  # (6,) N*m*s/rad
 FRICTION_COULOMB = np.array([0.391, 0.531, 0.498, 0.086, 0.094, 0.052])  # (6,) N*m
-FRICTION_STATIC = np.array([1.059, 1.132, 1.038, 0.176, 0.196, 0.172])  # (6,) N*m
-STRIBECK_VELOCITY = np.array([0.005, 0.005, 0.01, 0.01, 0.01, 0.005])  # (6,) rad/s
+FRICTION_STATIC = np.array([1.059, 1.132, 1.038, 0.17, 0.18, 0.172])  # (6,) N*m
+STRIBECK_VELOCITY = np.array([0.005, 0.005, 0.005, 0.005, 0.005, 0.005])  # (6,) rad/s
 
 
 class FeedForward:
