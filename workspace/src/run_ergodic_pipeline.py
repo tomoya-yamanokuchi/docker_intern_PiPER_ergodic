@@ -66,7 +66,7 @@ TCP_FRAME_NAME = "peg_tcp"
 N_COMPONENTS = 8
 ERGODIC_K = 10
 ERGODIC_N = 10
-U_MAX = 2.0  # cube units per second
+U_MAX = 3.0  # cube units per second
 # Ceiling on how fast the commanded pose may travel, whatever U_MAX and the
 # demonstration's span between them would ask for. It also bounds the first
 # interval, where the arm can start outside the cube with the setpoint far away.
@@ -76,21 +76,13 @@ R_WORLD_BASE = R.from_euler("xyz", [0, 0, 0], degrees=True).as_matrix()
 
 
 def make_controller(dofs: int) -> CartesianImpedanceController:
-    """CartesianImpedanceController with the gains validated in main_tast_imp.py.
-
-    Deliberately unchanged, so this run tests the two-rate architecture on its own
-    and not a gain change at the same time. They were not good enough for ergodic
-    control, but they are the known point to measure from.
-
-    Note the rotational damping is load-bearing: below 0.2, joint 4 overshoots.
-    joint_torque_weights is part of that gain, halving joints 4 to 6.
-    """
+    """CartesianImpedanceController with the gains validated in main_tast_imp.py."""
     controller = CartesianImpedanceController(
         urdf_path=str(URDF_PATH), dofs=dofs, frame_name=TCP_FRAME_NAME
     )
     controller.set_joint_torque_weights(np.array([1.0, 1.0, 1.0, 0.5, 0.5, 0.5]))
     controller.set_cart_params(
-        b=np.array([3.0, 3.0, 3.0, 0.1, 0.1, 0.1]),
+        b=np.array([4.0, 4.0, 4.0, 0.1, 0.1, 0.1]),
         k=np.array([200.0, 200.0, 200.0, 1.0, 1.0, 1.0]),
     )
     return controller

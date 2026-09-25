@@ -36,6 +36,7 @@ class CartesianImpedanceController:
         self.Kc = np.zeros(6, dtype=float)
         self.joint_torque_weights = np.ones(self.dofs, dtype=float)
         self.set_cart_params(
+            # b=np.array([28.0, 23.0, 31.0, 0.48, 0.56, 0.06], dtype=float) if b is None else b,
             b=np.array([5.0, 5.0, 5.0, 0.2, 0.2, 0.2], dtype=float) if b is None else b,
             k=np.array([200.0, 200.0, 200.0, 5.0, 5.0, 5.0], dtype=float) if k is None else k,
         )
@@ -91,7 +92,7 @@ class CartesianImpedanceController:
             raise ValueError("desired_ori 必须是 [3,3] 旋转矩阵")
 
         current_pos, current_rot = self.pin_model.forward_kinematics(q_cur, self.frame_name)
-        
+
         j = self.pin_model.jacobian(q_cur, self.frame_name)
 
         nle = self.pin_model.nonlinear_effects(q_cur, v_cur, base_orientation)
@@ -105,5 +106,5 @@ class CartesianImpedanceController:
         f_task = self.Kc * x_error + self.Bc * v_error
 
         tau = self.joint_torque_weights * (j.T @ f_task) + nle
-        
+
         return tau
