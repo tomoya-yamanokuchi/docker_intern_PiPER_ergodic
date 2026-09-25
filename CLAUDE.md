@@ -10,17 +10,21 @@ tree holding only `agx_reference/`).
 
 1. **Never run Python that can move the robot.** A real AgileX PiPER arm is
    physically connected. The scripts that open a session with it are
-   `agx_reference/piper/main_*.py`, `record_joint_angles.py` and
-   `play_joint_angles.py` — and, generally, anything that imports `pyAgxArm` or
+   `agx_reference/piper/main_*.py`, `record_joint_angles.py`,
+   `play_joint_angles.py`, `identify_friction.py` and `run_ergodic_pipeline.py`
+   — and, generally, anything that imports `pyAgxArm` or
    `execution.executor_helpers`, or calls `robot.connect()`, `robot.enable()`,
    `move_mit`, `move_p` or `move_j`. The user runs those; Claude writes the code
    and reads the output the user pastes back. Read-only inspection is fine:
    sources, the installed `pyAgxArm`, `ip link show can0`, `candump can0`.
 
-   **`core/`, `controller/` and `direct_teaching/` import no SDK and are safe to
-   run**, so a torque law, an FK call, a recording or an analysis of one can be
-   checked offline. Keep that split: a new control law or analysis goes in a
-   hardware-free module; only a top-level script touches the arm.
+   **`core/`, `controller/`, `direct_teaching/`, `ergodic_controller/`,
+   `kinematics/`, `simulation/` and `visualization/` import no SDK and are safe to
+   run**, so a torque law, an FK call, an ergodic step, a recording or an analysis
+   of one can be checked offline — and `simulation/fake_executor_helpers.py` runs
+   a whole execution script against a fake arm. Keep that split: a new control law
+   or analysis goes in a hardware-free module; only a top-level script touches the
+   arm.
 2. **Never create git commits** unless asked, and never add `Co-Authored-By:
    Claude` or `Claude-Session:` trailers.
 3. **`workspace/src/agx_reference/` is third-party code that stays close to
@@ -141,15 +145,22 @@ imported as `controller.feed_forward`, the same import root as the two
 controllers it is added to (§5). It is ours, so hard rule 3 does not protect it:
 it is linted and refactored like the rest of our code.
 
-**Deviation from upstream `HEAD`:** `agx_pinocchio.py` is byte-identical.
-`jnt_imp_controller.py` differs in whitespace only. `task_imp_controller.py`
-differs in whitespace and carries one commented-out alternative damping vector
-above its default `set_cart_params` call, left from tuning the ergodic run — dead
-code in an upstream file, and worth deleting rather than extending. The three
-`main_*.py` pass `PiperFW.DEFAULT` where upstream passes `PiperFW.V189` (this
-arm's firmware needs `DEFAULT`, §8), with the comment `# this arm reports
-S-V1.8-2` in `main_gc.py` and `main_tast_imp.py`, and trailing whitespace
-stripped. Nothing else.
+**Deviation from upstream `HEAD`**, checked with
+`diff <(git -C ~/agilex-arm-gravity-compensation show HEAD:<path>) <local>`:
+
+- `agx_pinocchio.py` — byte-identical.
+- `jnt_imp_controller.py` — whitespace only.
+- `task_imp_controller.py` — whitespace, plus one commented-out alternative
+  damping vector above its default `set_cart_params` call, left from tuning the
+  ergodic run. Dead code in an upstream file; delete it rather than extend it.
+- all three `main_*.py` — `PiperFW.DEFAULT` where upstream passes `PiperFW.V189`
+  (this arm's firmware needs `DEFAULT`, §8), with the comment
+  `# this arm reports S-V1.8-2` in `main_gc.py` and `main_tast_imp.py`.
+- `main_tast_imp.py` **also** differs in substance: `control_frequency` 100.0
+  where upstream has 200.0, `joint_torque_weights` `[1, 1, 1, 0.5, 0.5, 0.5]`
+  where upstream has `[1, 1, 1, 0.5, 1, 0.5]`, `k` `[200, 100, 100, 5, 5, 5]`
+  where upstream has `[200, 200, 200, 5, 5, 5]`, and two leftover `print(b)` /
+  `print(k)` debug lines.
 
 The local upstream checkout at `~/agilex-arm-gravity-compensation` carries
 **uncommitted** edits making the same `V189` to `DEFAULT` change, so compare
@@ -158,7 +169,8 @@ its working tree.
 
 ### The three demos
 
-All stream torque only, at 200 Hz:
+All stream torque only — `main_gc.py` and `main_jnt_imp.py` at 200 Hz,
+`main_tast_imp.py` at 100 Hz:
 
 ```python
 robot.move_mit(joint_id, 0, 0, 0, 0, tau[joint_id - 1])   # p = v = kp = kd = 0
@@ -186,7 +198,8 @@ Validated gains — joint space, `main_jnt_imp.py`:
 | `k` | `[10, 10, 10, 2, 1, 1]` N·m/rad |
 | `b` | `[0.5, 0.8, 0.8, 0.2, 0.2, 0.2]` N·m·s/rad |
 
-task space, `main_tast_imp.py` (also the controller's defaults):
+task space — these are `CartesianImpedanceController`'s own constructor defaults,
+and what `play_joint_angles.py` sets:
 
 | quantity | value |
 |---|---|
@@ -194,6 +207,11 @@ task space, `main_tast_imp.py` (also the controller's defaults):
 | `b` | `[5, 5, 5, 0.2, 0.2, 0.2]` |
 | `joint_torque_weights` | `[1, 1, 1, 0.5, 1, 0.5]` — trims joints 4 and 6 |
 | `ee_frame_name` | `link6` |
+
+**The local `main_tast_imp.py` no longer uses that set** — it lowers `k` on y and
+z to 100 and the joint 4–6 weights to 0.5, as listed in the deviations above. The
+ergodic run uses a third set again (§3, `run_ergodic_pipeline.make_controller`).
+So read the gains from the file you are about to run, not from this table.
 
 Every demo holds the pose it starts in. `R_world_base` is the identity (base
 mounted upright).
@@ -234,16 +252,30 @@ rather than writing another solver.
 
 ```
 workspace/src/
-├── agx_reference/                          # §4; not linted
+├── agx_reference/                          # §4; ours there is feed_forward.py
 ├── execution/executor_helpers.py           # pyAgxArm I/O          (TOUCHES THE ARM)
 ├── direct_teaching/                        # hardware-free
 │   ├── recorder/joint_angle_recorder.py    # JointAngleRecorder, load_recording
-│   └── player/joint_angle_player.py        # JointAnglePlayer: recording -> q(t)
-├── record_joint_angles.py                  # TOUCHES THE ARM: gravity comp + 10 Hz recording
-└── play_joint_angles.py                    # TOUCHES THE ARM: replay under Cartesian impedance
+│   ├── player/joint_angle_player.py        # JointAnglePlayer: recording -> q(t)
+│   ├── player/tracking_error.py            # flange tracking error of a replay, and its figure
+│   └── distribution/pose_distribution.py   # PoseDistribution: time-weighted GMM in the cube
+├── ergodic_controller/                     # hardware-free
+│   ├── ergodic_controller.py               # ErgodicController: cube state -> next cube state
+│   └── Ergodic_Exploration_using_TT_PiPER.ipynb   # the E2T2 notebook this was ported from
+├── kinematics/kinematic_solver.py          # hardware-free: FK, Jacobian, closed-form IK (§4)
+├── visualization/visualizer.py             # hardware-free: offline views, and LiveView
+├── simulation/                             # hardware-free
+│   ├── meshcat_scene.py                    # MeshCat drawing in the world frame
+│   └── fake_executor_helpers.py            # a fake arm, so an execution script runs offline
+├── record_joint_angles.py                  # TOUCHES THE ARM: gravity comp + 100 Hz recording
+├── play_joint_angles.py                    # TOUCHES THE ARM: replay under Cartesian impedance
+├── identify_friction.py                    # TOUCHES THE ARM: friction from sweeps
+├── make_sweep_recording.py                 # hardware-free: a synthetic recording to replay
+└── run_ergodic_pipeline.py                 # TOUCHES THE ARM: the online peg-in-hole run (§3)
 ```
 
-There are no `__init__.py` files; these are namespace packages.
+There are no `__init__.py` files; these are namespace packages. Every `test_*.py`
+sits beside the module it tests.
 
 ### `execution/executor_helpers.py`
 
@@ -254,15 +286,19 @@ upstream loop:
 |---|---|
 | `connect_arm()` | `PiperFW.DEFAULT` on `can0`, `connect`, loop on `enable()`, wait until `get_joint_angles()` is not `None` |
 | `read_joint_velocities(robot)` | (6,) rad/s via six `get_motor_states(i)` calls |
-| `apply_joint_torques(robot, tau)` | `move_mit(j, 0, 0, 0, 0, tau[j-1])`; prints and carries on on exception, as upstream does |
+| `apply_joint_torques(robot, tau)` | raises `RuntimeError` if any `|tau|` exceeds `8*b*c`, else `move_mit(j, 0, 0, 0, 0, tau[j-1])`; on an SDK exception it prints and carries on, as upstream does |
 | `hold_current_pose(robot, q)` | the §4 exit hold; tries every joint even if one fails |
 
-Torques go out exactly as `agx_reference` sends them, with no clipping of our
-own. The only bound is the SDK's clamp to the `t_ff` range (§8).
+**Nothing is clipped, but an over-limit torque is refused.** Torques otherwise go
+out exactly as `agx_reference` sends them. What is new is the pre-check: the SDK
+would silently clamp to `±8*b*c` and print a warning (§8), and a clamped joint has
+lost its damping and oscillates at the limit, so `apply_joint_torques` raises
+instead and lets the caller's `finally` hold the arm. A run that ends this way is
+a gain problem, not a glitch.
 
 ### Recording — `record_joint_angles.py`
 
-The `main_gc.py` loop (200 Hz, `rnea(q, qd, 0)`), plus
+The `main_gc.py` loop (100 Hz here, `rnea(q, qd, 0)`), plus
 `JointAngleRecorder.sample(t_now, q)` fed the `q` the loop already reads. The
 operator backdrives the arm through the poses that matter. On exit a `finally`
 block holds the pose **first**, then writes the file, so a failed write cannot
@@ -272,16 +308,25 @@ leave the arm unheld — and the file is written on any exit, not only Ctrl-C.
 call. After an overrun it jumps past every elapsed slot, so an overrun drops
 samples rather than bunching them: the gaps in `t` are real.
 
+`REC_FREQ_HZ` and `CONTROL_FREQ_HZ` are both 100, so every control cycle is
+recorded; the recorder's grid still matters, because it is what makes an overrun
+drop a sample rather than shift the timeline.
+
 **Format:** `workspace/output/joint_angles_<YYYYmmdd_HHMMSS>.npz` with `t` (N,) s
 from the first sample (`t[0] = 0`) and `q` (N, 6) rad. Read it with
 `direct_teaching.recorder.joint_angle_recorder.load_recording(path)`, which
-returns `(t, q)`.
+returns `(t, q)` — **trimmed, not raw**: it applies `trim_dwell`, dropping the
+stationary samples at both ends (the operator walking to and from the arm) and
+restarting `t` at 0. It raises if the recording never leaves its first pose.
 
 ### Replay — `play_joint_angles.py`
 
-Picks the newest `joint_angles_*.npz` by filename, then runs the `main_tast_imp.py`
-loop and gains, except that the target moves: each cycle it is
-`FK(link6, player.joint_angles_at(t))`, the full flange pose of the recorded `q`.
+Takes the recording as a mandatory positional argument — the arm replays whatever
+that file holds, so it never picks one implicitly. It runs the `main_tast_imp.py`
+loop at 200 Hz with the Cartesian gains of §4's table (the controller's defaults,
+not what the local demo file now sets), except that the target moves: each cycle
+it is `FK(link6, player.joint_angles_at(t))`, the full flange pose of the recorded
+`q`.
 
 `JointAnglePlayer.load(path, q_start)` prefixes the recording with a joint-space
 approach from the current pose, lasting `max(1 s, max|q_rec[0] - q_start| / 0.3
@@ -289,8 +334,11 @@ rad/s)`. `joint_angles_at(t)` interpolates each joint linearly and holds the
 first or last sample outside the timeline, so after the recording ends the arm
 holds its final pose until Ctrl-C, which triggers the exit hold.
 
-Only the flange pose is tracked, not `q`, and with no velocity feedforward (§4)
-the arm lags a fast demonstration.
+Only the flange pose is tracked, not `q`. The impedance law itself takes no
+desired velocity (§4), so on its own it would lag a fast demonstration; the replay
+makes that up outside the law, adding `FeedForward.compute_torque` with
+`qd_des = player.joint_velocities_at(t)` and
+`qdd_des = player.joint_accelerations_at(t)` on top of the impedance torque.
 
 ### Imports, lint and checks
 
@@ -303,27 +351,47 @@ own packages at the top of the file, with no `sys.path` manipulation, and runs
 from any directory. Import the wrapper as `core.agx_pinocchio`, never
 `agx_reference.core.agx_pinocchio`, or the same file loads twice under two names.
 
-**`agx_reference` is excluded from ruff; everything else is linted.** The
-`.claude/hooks/quality-gate.sh` PostToolUse hook runs `ruff format` and
-`ruff check` on every edited `.py` and blocks until it is clean. Do not use
-`noqa`: refactor instead. The rule set (`pyproject.toml`) includes mccabe
-complexity 8, `max-branches` 8, `max-statements` 30 and `max-args` 6, so long
-functions have to be split. `ruff check workspace/src` is currently clean.
+**`agx_reference` is excluded from a ruff directory scan, but not from the hook.**
+`pyproject.toml` sets `extend-exclude` on that directory and no `force-exclude`,
+and ruff applies an exclude to paths it discovers, not to paths given on the
+command line. So `ruff check workspace/src` skips it, while
+`.claude/hooks/quality-gate.sh` — the PostToolUse hook, which passes the edited
+file explicitly and runs `ruff format` then `ruff check`, blocking until clean —
+does lint it. That is what holds our `feed_forward.py` to the same standard
+(§4), and it is also why an explicit `ruff check` over upstream files floods with
+findings that are not ours to fix. Do not use `noqa`: refactor instead. The rule
+set includes mccabe complexity 8, `max-branches` 8, `max-statements` 30 and
+`max-args` 6, so long functions have to be split.
+
+`ruff check workspace/src` reports 24 findings, every one of them in the tracked
+vendor notebook `ergodic_controller/Ergodic_Exploration_using_TT_PiPER.ipynb`.
+Our `.py` files are clean; treat that notebook the way `agx_reference` is
+treated, and do not tidy it.
 
 **Prove numerical code by a command, not by inspection.** Compare against an
 independent computation — an analytic result, a finite difference, a round trip —
 never against a value just printed and pasted in (the `numeric-check` skill).
-`pyproject.toml` points pytest at `tests/`, which does not exist yet. A quick
-offline check needing no arm: both controllers reduce to gravity compensation at
-zero error, which at the zero pose is `[0, 3.188, -2.807, -0.011, -0.235, 0]` N·m,
-with the `link6` origin at `[0.0561, 0, 0.2132]` m.
+
+**There is no pytest in the container**, and `pyproject.toml` still points
+`testpaths` at a `tests/` directory that does not exist, so the `test_*.py` files
+beside each module are run by importing them and calling their `test_*` functions
+(41 of them pass as of this writing). A quick offline check needing no arm: both
+controllers reduce to gravity compensation at zero error, which at the zero pose
+is `[0, 3.188, -2.807, -0.011, -0.235, 0]` N·m, with the `link6` origin at
+`[0.0561, 0, 0.2132]` m and `peg_tcp` at `[0.1159, 0, 0.2184]` m — the peg link
+is massless, so adding it left the gravity torque unchanged.
 
 ### Claude Code configuration (`.claude/`)
 
 - `settings.json` — the PostToolUse lint hook, allowed read-only commands, and a
-  deny list of arm-touching commands. The deny list predates the current tree: it
-  names `piper/main_*` and `agx_reference/*`, but not `record_joint_angles.py` or
-  `play_joint_angles.py`. Hard rule 1 applies regardless.
+  deny list of arm-touching commands. **The deny list is badly out of date and
+  cannot be relied on.** It names `piper/main_*` and `agx_reference/*`, plus
+  `main.py` and `print_joint_limits.py`, which no longer exist (the `piper_sdk`
+  era). It does **not** name any of the four scripts that actually touch the arm
+  today: `record_joint_angles.py`, `play_joint_angles.py`, `identify_friction.py`
+  and `run_ergodic_pipeline.py`. It also denies `python test_*`, which now blocks
+  hardware-free tests instead of anything dangerous. Hard rule 1 is the real
+  protection and applies regardless.
 - `rules/hardware.md` — extra rules loaded when editing
   `agx_reference/piper/**` or `agx_reference/controller/**`.
 - `agents/reviewer.md` — a fresh-context diff reviewer for correctness and scope.
@@ -331,8 +399,9 @@ with the `link6` origin at `[0.0561, 0, 0.2132]` m.
   `paper-to-spec` (paper to implementable spec, user-invoked only), and
   `weekly-report`.
 
-**Weekly reports** are LaTeX, IROS-paper style, in `weekly_reports/` (currently
-only `template/`). The directory is gitignored; see the `weekly-report` skill.
+**Weekly reports** are LaTeX, IROS-paper style, in `weekly_reports/`, one numbered
+directory per week (`1/`, `2/`, `3/` so far). The directory is gitignored; see the
+`weekly-report` skill.
 
 ---
 
@@ -485,10 +554,12 @@ docker exec piper-ergodic bash -lc 'cd /home/jens/workspace/docker_intern_PiPER_
 
 **Visualisation.** `--net=host` makes every viewer reachable from the host
 browser: meshcat `:7000`, matplotlib WebAgg `:8988`, JupyterLab `:8888`. meshcat
-is the default for anything 3D. Static figures use `Agg` and go to
-`workspace/output/`. There is **no viewer in the tree**; a new one should be
-built on `AgxPinocchio.forward_kinematics` and the URDF and meshes in
-`agx_reference/piper/piper/`.
+is the default for anything 3D. Static figures go to `workspace/output/`; the one
+writer of them, `direct_teaching/player/tracking_error.py`, selects no backend of
+its own. **The viewer is `visualization/visualizer.py`**, drawing
+through `simulation/meshcat_scene.py`; it uses WebAgg rather than `Agg`, since its
+panels are interactive. A new view is a method or a class there, not a new script
+(§5).
 
 **The container is not headless.** `--net=host` shares the host loopback, so a
 `DISPLAY` naming a TCP display there (`localhost:600x`, from a forwarded X
@@ -598,12 +669,16 @@ travel positive and joint 3 only negative. The spans — 300°, 180°, 170°, 20
 140°, 240° — are very unequal, so binning or normalising over joint space must be
 per joint.
 
-**Torque control has no limit protection.** The firmware's soft limits act on
-position setpoints; nothing stops a commanded `t_ff` from driving a joint into
-its stop, and with `kp = kd = 0` the driver contributes no restoring force. No
-loop in the tree bounds its torque or watches `q` against this table — they
-mirror `agx_reference`, whose targets are always reachable poses. A controller
-whose target can wander (the ergodic one) is where that has to be decided.
+**Torque control has no joint-limit protection.** The firmware's soft limits act
+on position setpoints; nothing stops a commanded `t_ff` from driving a joint into
+its stop, and with `kp = kd = 0` the driver contributes no restoring force. **No
+loop watches `q` against this table** — they mirror `agx_reference`, whose targets
+are always reachable poses. A controller whose target can wander (the ergodic one)
+is where that has to be decided.
+
+The torque magnitude, unlike `q`, is guarded: everything that goes through
+`execution/executor_helpers.apply_joint_torques` refuses a `tau` beyond `±8*b*c`
+rather than letting the SDK clamp it silently (§5).
 
 ### Firmware behaviour, established by experiment in the `piper_sdk` era
 
@@ -653,9 +728,18 @@ the arm.
   matrices internally and `scipy.spatial.transform.Rotation` at its edges
   (`R.from_euler` for the base orientation). Pick one per function and convert at
   the boundary.
-- **Loop overruns.** A cycle that exceeds 5 ms prints
-  `warning: control loop overrun`. The first thing to profile is
-  `read_joint_velocities`: six separate `get_motor_states()` calls per cycle.
+- **Loop overruns.** A cycle that exceeds its own period prints
+  `warning: control loop overrun` — 5 ms in `play_joint_angles.py` at 200 Hz,
+  10 ms in `record_joint_angles.py` and `run_ergodic_pipeline.py` at 100 Hz. The
+  first thing to profile is `read_joint_velocities`: six separate
+  `get_motor_states()` calls per cycle.
+- **Never draw to MeshCat from inside a control loop.** A message is a zmq round
+  trip to the server process, and it is only cheap when the calls come back to
+  back: measured against the fake arm, one `LiveView` update cost a median 9.6 ms
+  when called a control period apart, against 0.86 ms hot. `LiveView` therefore
+  only stores the newest state in `update()` and draws from a daemon thread, which
+  works because pyzmq drops the GIL while it blocks. Anything else that wants to
+  watch a live loop does the same.
 
 ---
 
@@ -673,7 +757,9 @@ The user — never Claude — runs, inside the container:
 ```bash
 cd /home/jens/workspace/docker_intern_PiPER_ergodic/workspace/src
 python record_joint_angles.py            # teach: backdrive the arm, Ctrl-C saves
-python play_joint_angles.py              # replay the newest recording
+python play_joint_angles.py <rec>.npz    # replay that recording (path is required)
+python run_ergodic_pipeline.py <rec>.npz # the online run; MeshCat on :7000 (§3)
+python identify_friction.py              # friction sweeps, for feed_forward.py
 
 cd agx_reference
 python piper/main_gc.py                  # pure gravity compensation
