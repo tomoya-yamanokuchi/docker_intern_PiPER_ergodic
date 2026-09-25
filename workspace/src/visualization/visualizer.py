@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 import meshcat
 import numpy as np
 
-from core.agx_pinocchio import AgxPinocchio
+from controller.feed_forward import STRIBECK_VELOCITY
+from core.agx_pinocchio import AgxPinocchio, helper
 from direct_teaching.distribution.pose_distribution import PoseDistribution
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 from ergodic_controller.ergodic_controller import ErgodicController
@@ -21,6 +22,7 @@ from simulation.meshcat_scene import (
     animate_robot,
     draw_joint_sweeps,
     draw_position_distribution,
+    draw_tcp_paths,
     show_robot,
 )
 
@@ -41,6 +43,107 @@ GRID_POINTS = 100
 # Fourier modes and quadrature points per dimension, from the E2T2 notebook.
 ERGODIC_K = 5
 ERGODIC_N = 10
+
+# ErgodicController's c: across this band at each face the ergodic command is
+# blended out in favour of a velocity toward the cube centre.
+CENTRE_BAND = 0.05
+# A PoseDistribution built with margin 0.1 puts its data in exactly this range,
+# because the cube is 1.2 times the data's own width on every axis.
+DATA_RANGE = (1 / 12, 11 / 12)
+
+# t_ff quantisation step and clamp, pyAgxArm PiperFW.DEFAULT. A commanded torque
+# below half a step encodes to the same value as no command at all.
+TORQUE_STEP = np.array([0.251, 0.251, 0.251, 0.051, 0.051, 0.051])  # (6,) N*m
+TORQUE_LIMIT = np.array([32.0, 32.0, 32.0, 6.506, 6.506, 6.506])  # (6,) N*m
+# Below this a joint counts as standing: feed_forward.py's compensation band,
+# so the same speed that module treats as standstill is used here.
+STILL_SPEED = STRIBECK_VELOCITY  # (6,) rad/s
+
+
+def _impedance_torque(
+    pin_model: AgxPinocchio,
+    q: np.ndarray,  # (N, 6) rad
+    qd: np.ndarray,  # (N, 6) rad/s
+    tau: np.ndarray,  # (N, 6) N*m, as sent
+) -> np.ndarray:  # (N, 6) N*m
+    """The part of the sent torque that carries the command, not the arm's weight.
+
+    What goes out is dominated by the nonlinear effects holding the arm up, which
+    say nothing about tracking. What is left after subtracting them is what has to
+    clear half a t_ff quantisation step to reach the joint at all.
+    """
+    return np.array(
+        [
+            tau_i - pin_model.nonlinear_effects(q_i, qd_i)
+            for tau_i, q_i, qd_i in zip(tau, q, qd, strict=True)
+        ]
+    )
+
+
+def _print_stall_diagnosis(commanding: np.ndarray, moving: np.ndarray) -> None:
+    """Why each joint is or is not following, as a share of cycles.
+
+    The three outcomes are exclusive and exhaustive, so each joint's row sums to
+    100, and which column is large is the diagnosis: 'rounds away' means the
+    impedance torque never reached the joint, 'stalled' means it did and the joint
+    did not move anyway, which is friction.
+    """
+    print(f"\n{'joint':>6s} {'rounds away':>12s} {'stalled':>9s} {'moving':>8s}")
+    for j in range(commanding.shape[1]):
+        c, m = commanding[:, j], moving[:, j]
+        print(
+            f"{j + 1:>6d} {(~c).mean() * 100:>11.1f}% {(c & ~m).mean() * 100:>8.1f}%"
+            f" {m.mean() * 100:>7.1f}%"
+        )
+
+
+def _show_tracking(
+    pin_model: AgxPinocchio,
+    axes,  # three axes: joint speed, then impedance torque for joints 1-3 and 4-6
+    t: np.ndarray,  # (N,) s
+    q: np.ndarray,  # (N, 6) rad
+    tau: np.ndarray,  # (N, 6) N*m, as sent
+) -> None:
+    """Why the arm is or is not moving toward the setpoint, read across two signals.
+
+    Online control recomputes the target from the measured pose every step, so the
+    position error is the commanded lead whatever the arm does and cannot answer
+    this. Joint speed and impedance torque can, read together:
+
+        torque inside the quantisation band  -> the command never reached the joint
+        torque outside it but the joint still -> friction is holding it
+        joint moving                          -> it is following
+
+    qd is a central difference of the logged q, so it lags what the loop read by
+    half a cycle. STILL_SPEED is feed_forward.py's Stribeck band, the speed below
+    which that module already treats a joint as standing.
+    """
+    qd = np.gradient(q, t, axis=0)
+    contribution = _impedance_torque(pin_model, q, qd, tau)
+    commanding = np.abs(contribution) > TORQUE_STEP / 2.0
+    moving = np.abs(qd) > STILL_SPEED
+    print(f"peak |tau| sent {np.round(np.abs(tau).max(axis=0), 3)} of {TORQUE_LIMIT} N*m")
+    _print_stall_diagnosis(commanding, moving)
+
+    for j in range(6):
+        axes[0].plot(t, np.abs(qd[:, j]), linewidth=0.8, label=f"joint {j + 1}")
+    axes[0].axhspan(0.0, STILL_SPEED.max(), color="#d9534f", alpha=0.12, zorder=0)
+    axes[0].set_ylabel("joint speed [rad/s]")
+    axes[0].set_yscale("log")
+    for ax, joints in ((axes[1], (0, 1, 2)), (axes[2], (3, 4, 5))):
+        ax.axhspan(
+            -TORQUE_STEP[joints[0]] / 2,
+            TORQUE_STEP[joints[0]] / 2,
+            color="#d9534f",
+            alpha=0.12,
+            zorder=0,
+        )
+        for j in joints:
+            ax.plot(t, contribution[:, j], linewidth=0.8, label=f"joint {j + 1}")
+        ax.set_ylabel(f"impedance $\\tau$ [N m]\njoints {joints[0] + 1}-{joints[-1] + 1}")
+    for ax in axes:
+        ax.legend(loc="upper right", fontsize=7, ncol=3)
+        ax.grid(color="0.9", linewidth=0.5)
 
 
 def _sample_marginal(
@@ -76,6 +179,46 @@ def _plot_marginal_contour(
     ax.set_ylabel(LABELS[dims[1]])
 
 
+def _cube_axis_labels(distribution: PoseDistribution) -> list[str]:
+    """Per-axis label carrying the physical width of the cube on that axis."""
+    span = distribution.upper - distribution.lower
+    # The orientation axes hold half-angle quaternion logs, so the rotation they
+    # span is twice the axis width.
+    widths = [(w, "m") for w in span[:3]] + [(2 * w, "rad") for w in span[3:]]
+    return [f"$X_{i + 1}$  ({w:.4f} {unit})" for i, (w, unit) in enumerate(widths)]
+
+
+def _report_wall_contact(distribution: PoseDistribution, X: np.ndarray) -> None:  # (N, 6)
+    """How much of the trajectory sits where the ergodic command is being blended out."""
+    span = distribution.upper - distribution.lower
+    in_band = (X < CENTRE_BAND) | (X > 1.0 - CENTRE_BAND)
+    print(f"cube width: {np.round(span[:3], 4)} m, {np.round(2 * span[3:], 4)} rad")
+    print(
+        f"fraction of time in the pull-to-centre band, per axis: "
+        f"{np.round(in_band.mean(axis=0), 3)}"
+    )
+    print(f"in the band on at least one axis: {in_band.any(axis=1).mean():.3f} of the time")
+
+
+def _plot_cube_axes(t: np.ndarray, X: np.ndarray, distribution: PoseDistribution) -> None:
+    """One panel per cube axis on fixed [0, 1], position left, orientation right."""
+    fig, axes = plt.subplots(3, 2, figsize=(12, 8), sharex=True, layout="constrained")
+    fig.suptitle("Cube state per axis; shaded = pull-to-centre band, dashed = demonstrated range")
+    labels = _cube_axis_labels(distribution)
+    for ax, label, x_axis in zip(axes.T.ravel(), labels, X.T, strict=True):
+        ax.axhspan(0.0, CENTRE_BAND, color="#d62728", alpha=0.15)
+        ax.axhspan(1.0 - CENTRE_BAND, 1.0, color="#d62728", alpha=0.15)
+        for edge in DATA_RANGE:
+            ax.axhline(edge, color="0.5", linestyle="--", linewidth=0.8)
+        ax.plot(t, x_axis, color="#1f5f99", linewidth=0.8)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_ylabel(label, fontsize=8)
+        ax.grid(color="0.9", linewidth=0.5)
+    for ax in axes[-1]:
+        ax.set_xlabel("t [s]")
+    axes[0, 0].set_xlim(t[0], t[-1])
+
+
 class Visualizer:
     def __init__(self, urdf_path: Path = URDF_PATH, frame_name: str = "peg_tcp"):
         self.urdf_path = urdf_path
@@ -100,6 +243,90 @@ class Visualizer:
         if sweep_amplitude is not None:
             draw_joint_sweeps(viewer, self.pin_model.robot, q, sweep_amplitude, self.frame_name)
         return viewer
+
+    def show_wall_contact(
+        self,
+        recording_path: Path,
+        n_components: int,
+        duration: float = 30.0,  # s
+        dt: float = 0.01,  # s
+        u_max: float = 0.5,  # cube units per second
+    ) -> None:
+        """Why a 6-D run stalls: the cube state against the pull-to-centre band.
+
+        Simulates the ergodic trajectory offline, so it needs no arm. The
+        orientation axes span only a few degrees of real rotation, so the state
+        reaches their band within seconds and the ergodic command is replaced
+        there by a pull toward the cube centre.
+        """
+        t_rec, q_rec = load_recording(recording_path)
+        distribution, X_samples = self._fit_distribution(t_rec, q_rec, n_components)
+        controller = ErgodicController(distribution.pdf, 6, ERGODIC_K, ERGODIC_N, u_max)
+        X = [X_samples[len(X_samples) // 2]]
+        for _ in range(int(duration / dt)):
+            X.append(controller.step(X[-1], dt))
+        X = np.array(X)
+        print(f"ergodic metric: {controller.ergodic_metric():.4f}")
+        _report_wall_contact(distribution, X)
+        _plot_cube_axes(dt * np.arange(len(X)), X, distribution)
+        print("matplotlib: http://127.0.0.1:8988")
+        plt.show()
+
+    def show_ergodic_run(self, run_path: Path) -> None:
+        """Commanded against measured TCP for a run on the arm, from run_ergodic_pipeline.py.
+
+        Control is fully online, so the commanded pose is one ergodic step from the
+        measured one and the two paths nearly overlie; the error panels are where
+        the gap is legible. That gap should sit near the commanded lead, u dt
+        mapped out of the cube, and a much larger one means the arm is not
+        following.
+        """
+        run = np.load(run_path)
+        t, q, p_target, R_target = run["t"], run["q"], run["p_target"], run["R_target"]
+        poses = [self.pin_model.forward_kinematics(q_i, self.frame_name) for q_i in q]
+        p = np.array([p_i for p_i, _ in poses])
+        position_error = np.linalg.norm(p_target - p, axis=1)
+        orientation_error = np.array(
+            [
+                np.linalg.norm(helper.orientation_error_rotmat(R_t, R_i))
+                for R_t, (_, R_i) in zip(R_target, poses, strict=True)
+            ]
+        )
+        print(
+            f"{len(t)} cycles over {t[-1]:.1f} s, TCP travelled "
+            f"{np.linalg.norm(np.diff(p, axis=0), axis=1).sum():.4f} m"
+        )
+        print(
+            f"position error    median {np.median(position_error):.5f} m, "
+            f"max {position_error.max():.5f} m"
+        )
+        print(
+            f"orientation error median {np.median(orientation_error):.5f} rad, "
+            f"max {orientation_error.max():.5f} rad"
+        )
+
+        viewer = meshcat.Visualizer()
+        print(f"meshcat: {viewer.url()}")
+        draw_tcp_paths(viewer, p, p_target)
+        animate_robot(viewer, self.pin_model.robot, t, q, self.frame_name)
+
+        # Runs recorded before the torque was logged still show their error panels.
+        rows = 5 if "tau" in run.files else 2
+        _, axes = plt.subplots(rows, 1, figsize=(10, 3 * rows), sharex=True, layout="constrained")
+        for ax, error, label in (
+            (axes[0], position_error, "position error [m]"),
+            (axes[1], orientation_error, "orientation error [rad]"),
+        ):
+            ax.plot(t, error, color="#1f5f99", linewidth=0.8)
+            ax.set_ylabel(label)
+            ax.set_ylim(bottom=0.0)
+            ax.grid(color="0.9", linewidth=0.5)
+        if rows == 5:
+            _show_tracking(self.pin_model, axes[2:], t, q, run["tau"])
+        axes[-1].set_xlabel("t [s]")
+        axes[-1].set_xlim(t[0], t[-1])
+        print("matplotlib: http://127.0.0.1:8988")
+        plt.show()
 
     def show_pose_distribution(self, recording_path: Path, n_components: int) -> None:
         """Fit a PoseDistribution to one recording and show its marginals with the recording on top."""
@@ -187,6 +414,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     recording = args.recording or sorted(OUTPUT_DIR.glob("joint_angles_*.npz"))[-1]
+    if recording.name.startswith("ergodic_run_"):
+        Visualizer().show_ergodic_run(recording)
+        raise SystemExit
     # 8 components, as the E2T2 paper selected for its demonstrations.
     # Visualizer().show_pose_distribution(recording, n_components=8)
     Visualizer().show_ergodic_trajectory(recording, 8, 60)
+    # Visualizer().show_wall_contact(recording, 8, 60)

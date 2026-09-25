@@ -49,6 +49,20 @@ def draw_position_distribution(
     )
 
 
+def draw_tcp_paths(
+    viewer: meshcat.Visualizer,
+    p_measured: np.ndarray,  # (N, 3) m
+    p_target: np.ndarray,  # (N, 3) m
+) -> None:
+    """Where the TCP went, in black, against where it was commanded to go, in red."""
+    for name, p, color in (
+        ("run/measured", p_measured, [0.0, 0.0, 0.0]),
+        ("run/target", p_target, [1.0, 0.0, 0.0]),
+    ):
+        colors = np.tile(np.array(color, np.float32), (len(p), 1))
+        viewer[name].set_object(g.PointCloud(p.T.astype(np.float32), colors.T, size=0.002))
+
+
 def show_robot(
     viewer: meshcat.Visualizer,
     robot: pin.RobotWrapper,
