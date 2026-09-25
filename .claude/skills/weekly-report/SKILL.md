@@ -129,7 +129,8 @@ real bib entry.
 | $\xi(t)$, $\Lambda_{\mathbf{k}}$, $\mathbf{b}(t)$ | ergodic metric, its mode weights, its gradient direction |
 | $u_{\max}$ | speed of the ergodic reference |
 | $\mathbf{r} = [r_s\ \mathbf{r}_v^\top]^\top$, $\boldsymbol{\mu}$, $\operatorname{Log}_{\mathbf{g}}$, $\operatorname{Exp}_{\mathbf{g}}$ | unit quaternion ($\mathbf{q}$ is taken), mean orientation, half-angle quaternion maps at $\mathbf{g}$ |
-| $\mathbf{f}_{\mathrm{c}}$, $\boldsymbol{\tau}_{\mathrm{fw}}$ | Coulomb friction [N m], inertia + friction feedforward torque |
+| $f_{\mathrm{c},i}$, $f_{\mathrm{s},i}$, $v_{\mathrm{s},i}$, $\boldsymbol{\tau}_{\mathrm{fw}}$ | Coulomb and static friction [N m], Stribeck velocity [rad/s], inertia + friction feedforward torque |
+| $\mathcal{G}^{i}$, $r_i$, $\mathcal{I}_i$, $\mathcal{J}_i$, $\kappa$, $\delta$ | TT core, TT rank, TT-cross left / right index sets, rank increment (kickrank), relative tolerance |
 
 Add a row here when a new symbol becomes part of the project (for example the
 ergodic metric or the target distribution), so later reports inherit it.
