@@ -8,6 +8,7 @@ import numpy as np
 from direct_teaching.recorder.joint_angle_recorder import (
     JointAngleRecorder,
     load_recording,
+    save_datapoints,
     trim_dwell,
 )
 
@@ -110,6 +111,21 @@ def test_load_recording_trims_dwell() -> None:
         np.savez(path, t=t, q=q)
         _, q_loaded = load_recording(path)
     np.testing.assert_array_equal(q_loaded, q[3:8])
+
+
+def test_load_recording_keeps_every_datapoint_of_a_discrete_set() -> None:
+    rng = np.random.default_rng(2)
+    q = rng.uniform(-1.0, 1.0, (6, 6))
+    # Repeated end poses: how the operator weights a region, and exactly what
+    # trim_dwell would mistake for the dwell it drops.
+    q[1] = q[0]
+    q[-1] = q[-2]
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "datapoints.npz"
+        save_datapoints(path, q)
+        t_loaded, q_loaded = load_recording(path)
+    np.testing.assert_array_equal(q_loaded, q)
+    np.testing.assert_array_equal(t_loaded, np.arange(6))
 
 
 if __name__ == "__main__":

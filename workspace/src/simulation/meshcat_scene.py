@@ -43,6 +43,18 @@ def draw_pdf_cloud(
     viewer["distribution/position"].set_property("color", [1.0, 1.0, 1.0, PDF_OPACITY])
 
 
+def draw_datapoints(
+    viewer: meshcat.Visualizer,
+    p_samples: np.ndarray,  # (N, 3) m
+) -> None:
+    """The recorded flange positions, in black."""
+    viewer["distribution/samples"].set_object(
+        g.PointCloud(
+            p_samples.T.astype(np.float32), np.zeros_like(p_samples.T, np.float32), size=0.001
+        )
+    )
+
+
 def draw_position_distribution(
     viewer: meshcat.Visualizer,
     pdf_p: np.ndarray,  # (M, 3) m, drawn from the pdf
@@ -51,11 +63,7 @@ def draw_position_distribution(
 ) -> None:
     """Draws from the pdf coloured by log density, and the recorded flange positions in black."""
     draw_pdf_cloud(viewer, pdf_p, log_density)
-    viewer["distribution/samples"].set_object(
-        g.PointCloud(
-            p_samples.T.astype(np.float32), np.zeros_like(p_samples.T, np.float32), size=0.001
-        )
-    )
+    draw_datapoints(viewer, p_samples)
 
 
 def draw_tcp_paths(

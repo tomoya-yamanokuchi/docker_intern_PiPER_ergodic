@@ -65,8 +65,25 @@ def trim_dwell(t: np.ndarray, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return t[first : last + 1] - t[first], q[first : last + 1]
 
 
+def save_datapoints(path: Path, q: np.ndarray) -> None:
+    """Write q (M, 6) rad to an .npz file as a discrete datapoint set.
+
+    No t, and its absence is what marks the file as discrete: a confirmed pose
+    stands for itself, not for an interval, so every datapoint weighs the same.
+    """
+    np.savez(path, q=np.asarray(q, dtype=float).reshape(-1, 6))
+
+
 def load_recording(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Return (t (N,) s, q (N, 6) rad) from a file written by JointAngleRecorder.save,
-    with the dwell at both ends trimmed."""
+    with the dwell at both ends trimmed.
+
+    A file from save_datapoints carries no t; it gets one sample per unit time, so
+    _time_weights gives every datapoint equal weight. It is not trimmed: repeating
+    a pose is how the operator weights a region, and trim_dwell would read the
+    repeats at either end as the dwell it exists to drop.
+    """
     with np.load(path) as data:
+        if "t" not in data:
+            return np.arange(len(data["q"]), dtype=float), data["q"]
         return trim_dwell(data["t"], data["q"])

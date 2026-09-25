@@ -11,7 +11,8 @@ tree holding only `agx_reference/`).
 1. **Never run Python that can move the robot.** A real AgileX PiPER arm is
    physically connected. The scripts that open a session with it are
    `agx_reference/piper/main_*.py`, `record_joint_angles.py`,
-   `play_joint_angles.py`, `identify_friction.py` and `run_ergodic_pipeline.py`
+   `teach_datapoints.py`, `play_joint_angles.py`, `identify_friction.py` and
+   `run_ergodic_pipeline.py`
    — and, generally, anything that imports `pyAgxArm` or
    `execution.executor_helpers`, or calls `robot.connect()`, `robot.enable()`,
    `move_mit`, `move_p` or `move_j`. The user runs those; Claude writes the code
@@ -80,12 +81,17 @@ The pieces, in the order the data flows:
   static level with a Stribeck decay gated on the *measured* speed, so a
   standing joint gets enough torque to break away. The constants are fitted from
   constant-velocity sweeps (`identify_friction.py`).
-- **Direct teaching** — the operator backdrives the arm while `q` is recorded at
-  the control-loop rate (`REC_FREQ_HZ = 100`); a recording can be replayed under
-  the Cartesian impedance law.
+- **Direct teaching**, in two forms. `record_joint_angles.py` backdrives the arm
+  while `q` is recorded at the control-loop rate (`REC_FREQ_HZ = 100`), and such a
+  recording can be replayed under the Cartesian impedance law.
+  `teach_datapoints.py` instead records only the poses the operator **confirms**
+  with Enter — the E2T2 paper's own method, where importance is how many
+  datapoints a region got rather than how long the operator dwelt there.
 - **The target distribution** — `direct_teaching/distribution/pose_distribution.py`.
   A time-weighted GMM, so a sample's weight is the interval it covers and a
-  dwell is dense while a pass-through is sparse. **"Place" is the full 6-DoF
+  dwell is dense while a pass-through is sparse. A confirmed-datapoint file has no
+  time axis, so each datapoint gets one unit of time and they weigh equally, and
+  the density then follows the counts. **"Place" is the full 6-DoF
   pose**, as the E2T2 paper has it: the state is `[p, Log_mu(quat)]`, the
   orientation part a half-angle quaternion logarithm about the demonstration's
   mean orientation, scaled per axis into `[0, 1]^6`. The frame is `peg_tcp`, the
@@ -263,11 +269,12 @@ workspace/src/
 │   ├── ergodic_controller.py               # ErgodicController: cube state -> next cube state
 │   └── Ergodic_Exploration_using_TT_PiPER.ipynb   # the E2T2 notebook this was ported from
 ├── kinematics/kinematic_solver.py          # hardware-free: FK, Jacobian, closed-form IK (§4)
-├── visualization/visualizer.py             # hardware-free: offline views, and LiveView
+├── visualization/visualizer.py             # hardware-free: offline views, LiveView, TeachingView
 ├── simulation/                             # hardware-free
 │   ├── meshcat_scene.py                    # MeshCat drawing in the world frame
 │   └── fake_executor_helpers.py            # a fake arm, so an execution script runs offline
 ├── record_joint_angles.py                  # TOUCHES THE ARM: gravity comp + 100 Hz recording
+├── teach_datapoints.py                     # TOUCHES THE ARM: Enter-confirmed datapoints
 ├── play_joint_angles.py                    # TOUCHES THE ARM: replay under Cartesian impedance
 ├── identify_friction.py                    # TOUCHES THE ARM: friction from sweeps
 ├── make_sweep_recording.py                 # hardware-free: a synthetic recording to replay
@@ -318,6 +325,79 @@ from the first sample (`t[0] = 0`) and `q` (N, 6) rad. Read it with
 returns `(t, q)` — **trimmed, not raw**: it applies `trim_dwell`, dropping the
 stationary samples at both ends (the operator walking to and from the arm) and
 restarting `t` at 0. It raises if the recording never leaves its first pose.
+
+### Confirmed datapoints — `teach_datapoints.py`
+
+The E2T2 paper builds its reference distribution from M = 204 datapoints under
+kinesthetic teaching, each a deliberately posed end-effector pose, and gives
+insertion higher importance by taking **almost half the datapoints inside the
+hole**. Importance is therefore a count, not a dwell time. This script collects
+that way: the `record_joint_angles.py` gravity-compensation loop at 100 Hz, but
+nothing is recorded by the clock.
+
+| key | does |
+|---|---|
+| Enter | confirm the current `q` as a datapoint |
+| `u` | withdraw the last datapoint |
+| Ctrl-C | hold the arm, then save |
+
+**One confirmation is one datapoint.** A region is emphasised by confirming poses
+there repeatedly, which is what makes its share of the distribution equal its share
+of the datapoints. A batch count on the confirm line — type `40`, get forty copies
+— was tried and **explicitly rejected by the user**; do not re-propose it, or a
+per-datapoint weight, which is the same thing. Re-pose the arm slightly and confirm
+again instead, which is also what the paper did (below).
+
+Every change prints the count and the newest `peg_tcp` position, and hands the set
+to `TeachingView`, which **refits the GMM and redraws it in MeshCat** with the
+datapoints on top. Below `N_COMPONENTS = 8` datapoints no fit is possible (EM draws
+that many distinct means from the data), so only the datapoints are drawn and the
+line says how many more the first fit needs.
+
+**`REG_COVAR = 5e-3` floors a component's standard deviation at 0.071 cube units**,
+about 7 % of the cube on each axis — on an 80 mm cube, roughly 5.6 mm. So a cluster
+of near-identical confirmations cannot be sharper than that however many there are.
+The paper's own datapoints at the hole are separate successful insertions at
+different grasp offsets, about 15 mm and 10° apart, so re-pose the arm between
+confirmations and let the cluster have real spread.
+
+**stdin is polled, never blocked on** — `select.select([sys.stdin], [], [], 0)`.
+Blocking on `input()` would stop the torque stream, and the firmware latches the
+last torque (§8), so the arm would hold a stale gravity torque instead of
+compensating the pose it is being backdriven into. The flip side: with stdin
+redirected from a file or a closed pipe, EOF reads as an endless stream of bare
+newlines and the script would confirm a datapoint every cycle. It is interactive
+only; drive it from a terminal or a pty.
+
+**Format:** `workspace/output/datapoints_<YYYYmmdd_HHMMSS>.npz` with `q` (M, 6) rad
+and **no `t`** — a confirmed pose stands for itself, not for an interval. That
+absence is what marks the file as discrete, and `load_recording` dispatches on it,
+returning `(np.arange(M), q)`. Two consequences, both deliberate:
+
+- `_time_weights` on a unit grid is all ones, so every datapoint weighs the same
+  and the density follows the counts, which is the paper's semantics.
+- it is **not** trimmed. Repeating a pose is how the operator weights a region, and
+  `trim_dwell` would read repeats at either end as the dwell it exists to drop.
+
+So a datapoint file is read by the same `load_recording` as a recording and needs
+no special case in `run_ergodic_pipeline.py` or the visualizer. Both take an
+explicit path, so neither has to learn the new prefix.
+
+**Extending an existing set.** The optional positional argument is a
+`datapoints_*.npz` to start from, so a set can be grown over several sessions
+rather than collected in one:
+
+```bash
+python teach_datapoints.py                            # a new set
+python teach_datapoints.py ../output/datapoints_<ts>.npz   # load that set and extend it
+```
+
+The input is **only read**; the session writes a new timestamped file, so an edit
+cannot destroy the set it started from and each round leaves the previous one on
+disk. `u` withdraws from the end of the loaded set, so the last thing added is the
+first thing removable. **Removing an arbitrary datapoint is not supported by
+the script** — do that offline with `load_recording` and `save_datapoints`, which
+is also how a set is merged or split.
 
 ### Replay — `play_joint_angles.py`
 
@@ -375,7 +455,7 @@ never against a value just printed and pasted in (the `numeric-check` skill).
 **There is no pytest in the container**, and `pyproject.toml` still points
 `testpaths` at a `tests/` directory that does not exist, so the `test_*.py` files
 beside each module are run by importing them and calling their `test_*` functions
-(41 of them pass as of this writing). A quick offline check needing no arm: both
+(43 of them pass as of this writing). A quick offline check needing no arm: both
 controllers reduce to gravity compensation at zero error, which at the zero pose
 is `[0, 3.188, -2.807, -0.011, -0.235, 0]` N·m, with the `link6` origin at
 `[0.0561, 0, 0.2132]` m and `peg_tcp` at `[0.1159, 0, 0.2184]` m — the peg link
@@ -387,9 +467,9 @@ is massless, so adding it left the gravity torque unchanged.
   deny list of arm-touching commands. **The deny list is badly out of date and
   cannot be relied on.** It names `piper/main_*` and `agx_reference/*`, plus
   `main.py` and `print_joint_limits.py`, which no longer exist (the `piper_sdk`
-  era). It does **not** name any of the four scripts that actually touch the arm
-  today: `record_joint_angles.py`, `play_joint_angles.py`, `identify_friction.py`
-  and `run_ergodic_pipeline.py`. It also denies `python test_*`, which now blocks
+  era). It does **not** name any of the five scripts that actually touch the arm
+  today: `record_joint_angles.py`, `teach_datapoints.py`, `play_joint_angles.py`,
+  `identify_friction.py` and `run_ergodic_pipeline.py`. It also denies `python test_*`, which now blocks
   hardware-free tests instead of anything dangerous. Hard rule 1 is the real
   protection and applies regardless.
 - `rules/hardware.md` — extra rules loaded when editing
@@ -559,7 +639,11 @@ writer of them, `direct_teaching/player/tracking_error.py`, selects no backend o
 its own. **The viewer is `visualization/visualizer.py`**, drawing
 through `simulation/meshcat_scene.py`; it uses WebAgg rather than `Agg`, since its
 panels are interactive. A new view is a method or a class there, not a new script
-(§5).
+(§5). Two of its classes drive a live loop and both keep their sends on a daemon
+thread for the reason in §9's last bullet: `LiveView` for an ergodic run, and
+`TeachingView` for `teach_datapoints.py`, which also refits the GMM on that thread
+because a refit plus a 5000-point cloud is far more work than a control cycle has
+to spare.
 
 **The container is not headless.** `--net=host` shares the host loopback, so a
 `DISPLAY` naming a TCP display there (`localhost:600x`, from a forwarded X
@@ -730,7 +814,8 @@ the arm.
   the boundary.
 - **Loop overruns.** A cycle that exceeds its own period prints
   `warning: control loop overrun` — 5 ms in `play_joint_angles.py` at 200 Hz,
-  10 ms in `record_joint_angles.py` and `run_ergodic_pipeline.py` at 100 Hz. The
+  10 ms in `record_joint_angles.py`, `teach_datapoints.py` and
+  `run_ergodic_pipeline.py` at 100 Hz. The
   first thing to profile is `read_joint_velocities`: six separate
   `get_motor_states()` calls per cycle.
 - **Never draw to MeshCat from inside a control loop.** A message is a zmq round
@@ -757,8 +842,11 @@ The user — never Claude — runs, inside the container:
 ```bash
 cd /home/jens/workspace/docker_intern_PiPER_ergodic/workspace/src
 python record_joint_angles.py            # teach: backdrive the arm, Ctrl-C saves
+python teach_datapoints.py               # teach: Enter confirms a pose, u withdraws (§5)
+python teach_datapoints.py <dp>.npz      # ... or load that datapoint set and extend it
 python play_joint_angles.py <rec>.npz    # replay that recording (path is required)
 python run_ergodic_pipeline.py <rec>.npz # the online run; MeshCat on :7000 (§3)
+                                         # <rec> is either kind of teaching file
 python identify_friction.py              # friction sweeps, for feed_forward.py
 
 cd agx_reference

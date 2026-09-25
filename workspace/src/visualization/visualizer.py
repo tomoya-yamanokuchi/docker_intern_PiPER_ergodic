@@ -23,6 +23,7 @@ from kinematics.kinematic_solver import KinematicSolver
 from simulation.meshcat_scene import (
     animate_robot,
     draw_axes,
+    draw_datapoints,
     draw_joint_sweeps,
     draw_pdf_cloud,
     draw_position_distribution,
@@ -315,6 +316,74 @@ class LiveView:
                 self.measured.append(p)
                 self.commanded.append(p_target)
                 draw_tcp_paths(self.viewer, np.array(self.measured), np.array(self.commanded))
+
+
+class TeachingView:
+    """Live MeshCat scene for confirm-driven teaching: the arm as it is backdriven,
+    the datapoints confirmed so far, and the GMM refitted over them each time one
+    is added or withdrawn.
+
+    LiveView's threading contract, for LiveView's reason: a refit plus a
+    PDF_POINTS cloud is far more work than a control cycle has to spare. update()
+    and set_datapoints() only hand the newest state over; a daemon thread draws it.
+    """
+
+    def __init__(
+        self,
+        urdf_path: Path = URDF_PATH,
+        frame_name: str = "peg_tcp",
+        n_components: int = 8,  # as the E2T2 paper selected for its demonstrations
+    ):
+        self.pin_model = AgxPinocchio(str(urdf_path))
+        self.frame_name = frame_name
+        self.n_components = n_components
+        self.pending_q: np.ndarray | None = None
+        self.pending_points: np.ndarray | None = None
+        self.viewer = meshcat.Visualizer()
+        print(f"meshcat: {self.viewer.url()}")
+        self.robot_view = show_robot(self.viewer, self.pin_model.robot, np.zeros(6), frame_name)
+        threading.Thread(target=self._draw_pending, daemon=True).start()
+
+    def update(self, q: np.ndarray) -> None:  # (6,) rad, measured
+        """Hand the newest measured pose over. Stores one array, draws nothing."""
+        self.pending_q = q
+
+    def set_datapoints(self, q_points: list[np.ndarray]) -> None:  # each (6,) rad
+        """Hand the confirmed datapoints over, to be refitted and redrawn."""
+        self.pending_points = np.array(q_points).reshape(-1, 6)
+
+    def _draw_pending(self) -> None:
+        """Draw whatever was last handed over, newest state only, as LiveView does."""
+        while True:
+            points, self.pending_points = self.pending_points, None
+            if points is not None:
+                self._draw_distribution(points)
+            q, self.pending_q = self.pending_q, None
+            if q is None:
+                time.sleep(IDLE_POLL_PERIOD)
+                continue
+            p, rotation = self.pin_model.forward_kinematics(q, self.frame_name)
+            self.robot_view.display(q)
+            self.viewer["tcp"].set_transform(_homogeneous(p, rotation))
+
+    def _draw_distribution(self, q_points: np.ndarray) -> None:  # (M, 6) rad
+        """The datapoints, and the GMM over them once there are enough to fit one."""
+        poses = [self.pin_model.forward_kinematics(q_i, self.frame_name) for q_i in q_points]
+        p = np.array([p_i for p_i, _ in poses])
+        draw_datapoints(self.viewer, p)
+        # EM draws n_components distinct means from the data, so a fit needs at
+        # least that many datapoints.
+        if len(q_points) < self.n_components:
+            return
+        R = np.array([R_i for _, R_i in poses])
+        t = np.arange(len(p), dtype=float)  # one datapoint per unit time: equal weights
+        distribution = PoseDistribution(t, p, R, self.n_components)
+        rng = np.random.default_rng(0)
+        cube_points = _sample_marginal(distribution, POSITION_DIMS, PDF_POINTS, rng)
+        log_density = np.log10(distribution.marginal_pdf(cube_points, POSITION_DIMS))
+        draw_pdf_cloud(
+            self.viewer, _cube_to_physical(distribution, cube_points, POSITION_DIMS), log_density
+        )
 
 
 class Visualizer:

@@ -132,6 +132,22 @@ def test_priors_weight_by_time_not_sample_count() -> None:
     np.testing.assert_allclose(distribution.priors[1 - slow], fast_s / (slow_s + fast_s), atol=1e-3)
 
 
+def test_priors_weight_discrete_datapoints_by_count() -> None:
+    """A datapoint set carries no time, so importance is how many points a region got."""
+    rng = np.random.default_rng(RNG_SEED)
+    # 75 datapoints at one place against 25 at another, the E2T2 paper's way of
+    # giving the insertion states higher importance.
+    many = _cluster(rng, np.array([0.3, 0.2, 0.2]), 75, dt=1.0)
+    few = _cluster(rng, np.array([0.3, 0.0, 0.2]), 25, dt=1.0)
+    p, R = np.concatenate([many[1], few[1]]), np.concatenate([many[2], few[2]])
+    # One unit of time per datapoint, as load_recording hands a datapoint set over.
+    distribution = PoseDistribution(np.arange(len(p), dtype=float), p, R, n_components=2)
+    y_of_component = [distribution.state_to_pose(mean)[0][1] for mean in distribution.means]
+    few_index = int(np.argmin(y_of_component))
+    np.testing.assert_allclose(distribution.priors[few_index], 0.25, atol=1e-3)
+    np.testing.assert_allclose(distribution.priors[1 - few_index], 0.75, atol=1e-3)
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
