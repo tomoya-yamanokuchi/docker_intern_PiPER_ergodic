@@ -14,7 +14,18 @@
       "Bash(python workspace/src/print_joint_limits.py*)",
       "Bash(python3 workspace/src/print_joint_limits.py*)",
       "Bash(uv run main.py*)",
-      "Bash(uv run test_*)"
+      "Bash(uv run test_*)",
+      "Bash(python piper/main_*)",
+      "Bash(python3 piper/main_*)",
+      "Bash(python main_gc.py*)",
+      "Bash(python3 main_gc.py*)",
+      "Bash(python main_tast_imp.py*)",
+      "Bash(python3 main_tast_imp.py*)",
+      "Bash(python workspace/src/agx_reference/*)",
+      "Bash(python3 workspace/src/agx_reference/*)",
+      "Bash(python agx_reference/*)",
+      "Bash(python3 agx_reference/*)",
+      "Bash(uv run piper/main_*)"
     ],
     "allow": [
       "Bash(pytest*)",
