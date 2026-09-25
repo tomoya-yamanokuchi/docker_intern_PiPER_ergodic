@@ -5,7 +5,7 @@ export IMAGE_NAME=docker-piper-ergodic
 export CONTAINER_NAME=piper-ergodic
 
 # X11 cookie for the container. meshcat needs none of this -- it renders in the
-# host browser -- but matplotlib windows (visualization watch --plot traces) do.
+# host browser -- but matplotlib windows do, if anything here opens one.
 #
 # The host's own cookie lives under /run/user/1004/gdm/, which is awkward to
 # mount, so it is copied out here. The sed rewrites the address family to
@@ -20,7 +20,8 @@ touch ${XAUTH}
 xauth nlist "${DISPLAY}" | sed -e 's/^..../ffff/' | xauth -f ${XAUTH} nmerge -
 chmod 644 ${XAUTH}
 
-
+# PYTHONPATH carries two import roots: our code in workspace/src, and
+# agx_reference, whose files import core.* / controller.* as top-level packages.
 docker run --rm -it \
     --name ${CONTAINER_NAME} \
     --privileged \
@@ -32,7 +33,11 @@ docker run --rm -it \
     --volume "${XAUTH}:${XAUTH}:ro" \
     --volume "/tmp/.X11-unix:/tmp/.X11-unix:ro" \
     \
+    --env PYTHONPATH="/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic/workspace/src:/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic/workspace/src/agx_reference" \
+    \
 	--volume "/home/${USR_NAME}/Ergodic_Exploration_using_Tensor_Train:/home/${USR_NAME}/workspace/Ergodic_Exploration_using_Tensor_Train" \
+	\
+	--volume "/home/${USR_NAME}/agilex-arm-gravity-compensation:/home/${USR_NAME}/workspace/agilex-arm-gravity-compensation" \
 	\
     --volume "/home/${USR_NAME}/docker_intern_PiPER_ergodic:/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic" \
     \

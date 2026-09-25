@@ -59,6 +59,9 @@ temp/
 
 *.log
 
+# Weekly progress reports (LaTeX), kept out of the code history
+weekly_reports/
+
 # Uncomment these if generated figures/videos should NOT be versioned.
 # figures/
 # videos/
@@ -127,6 +130,11 @@ recordings/
 bags/
 *.bag
 
+# Kept demonstrations and the figures made from them: regenerable from the arm
+# and from the code, so out of history like everything else in output/.
+workspace/saved_recordings/
+workspace/plots/
+
 
 # ============================================================
 # Optional model / checkpoint files
@@ -143,10 +151,6 @@ checkpoints/
 # Vendored robot description
 # ============================================================
 
-# The collada variants are for ROS/Gazebo and nothing in workspace/src reads
-# them; the URDFs and the STLs it does read are tracked.
-workspace/robot_description/meshes/dae/
-workspace/robot_description/meshes/*.dae
-
-# Compiled binary, a build artifact of the xacro tooling.
-workspace/robot_description/urdf/compile
+# agx_reference carries its own description and all of it is tracked: the URDF
+# references the .dae meshes for <visual> and the .stl meshes for <collision>,
+# so ignoring either set would leave a fresh clone with an unloadable model.
