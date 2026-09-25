@@ -59,40 +59,58 @@ E2T2 / ergodic controller  ->  Python 3.10  ->  pyAgxArm
   ->  python-can  ->  socketcan  ->  can0 (gs_usb USB-CAN @ 1 Mbit/s)  ->  PiPER
 ```
 
-**Working and validated on the arm:** Cartesian impedance control — the end
-effector behaves as a spring-damper in task space with the null space free —
-plus joint impedance and pure gravity compensation. That is `agx_reference/`
-(§4).
+**Milestone reached: the online peg-in-hole task.** The whole chain runs on the
+arm — a demonstration is recorded under gravity compensation, a time-weighted
+distribution is fitted over the poses it visited, the E2T2 ergodic law explores
+that distribution, and the Cartesian impedance law tracks the pose it commands,
+with the run watchable live in MeshCat. `run_ergodic_pipeline.py` is that chain
+(§5); everything below it is validated on the arm.
 
-**Built beside it:** direct teaching (§5). The operator backdrives the arm under
-gravity compensation while `q` is recorded at 10 Hz; a recording can be replayed
-under the Cartesian impedance law.
+The pieces, in the order the data flows:
 
-**Next milestone: a time-spent distribution over the recordings** — a density
-whose value at a place is the time the operator spent there. Dwelling is dense,
-passing through is sparse. It is the empirical target distribution the E2T2
-machinery explores against. Settled so far:
+- **Impedance control** — Cartesian (end effector as a spring-damper in task
+  space, null space free), joint impedance, and pure gravity compensation. That
+  is `agx_reference/` (§4).
+- **Inertia and friction feedforward** — `controller/feed_forward.py`, on top of
+  the impedance torque. A gravity-model correction, and friction that keeps a
+  static level with a Stribeck decay gated on the *measured* speed, so a
+  standing joint gets enough torque to break away. The constants are fitted from
+  constant-velocity sweeps (`identify_friction.py`).
+- **Direct teaching** — the operator backdrives the arm while `q` is recorded at
+  the control-loop rate (`REC_FREQ_HZ = 100`); a recording can be replayed under
+  the Cartesian impedance law.
+- **The target distribution** — `direct_teaching/distribution/pose_distribution.py`.
+  A time-weighted GMM, so a sample's weight is the interval it covers and a
+  dwell is dense while a pass-through is sparse. **"Place" is the full 6-DoF
+  pose**, as the E2T2 paper has it: the state is `[p, Log_mu(quat)]`, the
+  orientation part a half-angle quaternion logarithm about the demonstration's
+  mean orientation, scaled per axis into `[0, 1]^6`. The frame is `peg_tcp`, the
+  peg tip 60 mm beyond `link6`, never `link6` itself.
+- **The ergodic controller** — `ergodic_controller/ergodic_controller.py`, the
+  E2T2 tensor-train law. Its output is a target pose and that pose is the entire
+  interface to the impedance controller; the two stay separate components.
+- **Closed-form IK** — `kinematics/kinematic_solver.py`, used offline only (the
+  online loop needs no IK, since the ergodic target is a pose the impedance law
+  tracks directly).
+- **Views** — `visualization/visualizer.py`: offline review of a recording, a
+  distribution or a finished run, plus `LiveView`, the live MeshCat scene of a
+  run. `simulation/fake_executor_helpers.py` runs an execution script against a
+  fake arm, so a loop can be exercised end to end with no hardware.
 
-- **Offline only.** It reads `.npz` recordings with no arm attached and belongs
-  in a hardware-free module; nothing of it goes into a control loop.
-- **Time, not sample count, is the weight.** At 10 Hz a sample stands for about
-  0.1 s, but `t` is stored, so a sample's exact weight is the interval it
-  covers, and samples dropped by a loop overrun are accounted for rather than
-  silently under-weighted.
-- **Joint angles are radians**; the per-joint support for binning is the limit
-  table in §8. The ranges are very unequal, so no shared bin width.
-- **A recording has dwell at both ends** — at the start pose until the operator
-  moves the arm, at the end pose until Ctrl-C. It counts as time spent unless
-  something decides otherwise.
-- Several recordings may feed one distribution.
-- Output goes in the gitignored `workspace/output/`.
+Two rates, deliberately different: the torque goes out at 100 Hz and the ergodic
+law sets a setpoint at 20 Hz, with the commanded pose walking the line between
+setpoints. Output goes in the gitignored `workspace/output/`.
 
-**Open, to settle before implementing:** whether "place" is the joint
-configuration `q` (6-D), the flange position `FK(q)` (3-D), or the full pose —
-and so which space the density lives in.
+**Next milestone: multiple trials, as in the E2T2 paper.** Between trials the
+arm's pose is reset to a start pose while the ergodic controller's accumulated
+history is kept, and the measurement is that the time to find the hole decreases
+over the sequence of trials. The load-bearing part is that a reset moves the arm,
+not the statistics: clearing the accumulated coverage at a trial boundary — or
+building each trial on a fresh `ErgodicController` — destroys the very effect the
+experiment exists to show.
 
 The E2T2 reference is `~/Ergodic_Exploration_using_Tensor_Train` (two notebooks,
-NumPy and JAX), mounted into the container (§7). No E2T2 code is in this tree yet.
+NumPy and JAX), mounted into the container (§7).
 
 ---
 
