@@ -52,6 +52,7 @@ from execution.executor_helpers import (
     hold_current_pose,
     read_joint_velocities,
 )
+from visualization.visualizer import LiveView
 
 AGX_REFERENCE = Path(__file__).resolve().parent / "agx_reference"
 URDF_PATH = AGX_REFERENCE / "piper/piper/urdf/piper_description.urdf"
@@ -99,14 +100,15 @@ def fit_distribution(
 
 def prepare_exploration(
     recording: Path,
-) -> tuple[CartesianImpedanceController, PoseDistribution, ErgodicController]:
-    """Everything offline, before the arm is touched."""
+) -> tuple[CartesianImpedanceController, PoseDistribution, ErgodicController, LiveView]:
+    """Everything offline, before the arm is touched -- the MeshCat scene included."""
     controller = make_controller(dofs=6)
     t_rec, q_rec = load_recording(recording)
     distribution = fit_distribution(controller, t_rec, q_rec)
     print(f"computing ergodic coefficients for {recording}")
     ergodic = ErgodicController(distribution.pdf, 6, ERGODIC_K, ERGODIC_N, U_MAX)
-    return controller, distribution, ergodic
+    live = LiveView(distribution, URDF_PATH, TCP_FRAME_NAME)
+    return controller, distribution, ergodic, live
 
 
 def next_setpoint(
@@ -214,6 +216,7 @@ def explore(  # noqa: PLR0913, PLR0917
     feed_forward: FeedForward,
     distribution: PoseDistribution,
     ergodic: ErgodicController,
+    live: LiveView,
     setpoints: tuple[np.ndarray, np.ndarray],  # (6,) cube units each: where from, where to
     log: list,  # appended in place, so the caller still has it after an interrupt
 ) -> None:
@@ -257,6 +260,7 @@ def explore(  # noqa: PLR0913, PLR0917
         # gated on it alone would repeat on every cycle of the interval.
         if cycle % cycles_per_step == 0:
             print_progress(controller, ergodic, joint_angles, target[0])
+            live.update(joint_angles, *target)
 
         elapsed_time = time.monotonic() - start_time
         if elapsed_time < period:
@@ -266,7 +270,7 @@ def explore(  # noqa: PLR0913, PLR0917
 
 
 def main(recording: Path) -> None:
-    controller, distribution, ergodic = prepare_exploration(recording)
+    controller, distribution, ergodic, live = prepare_exploration(recording)
 
     feed_forward = FeedForward(urdf_path=str(URDF_PATH), dofs=6)
 
@@ -287,7 +291,9 @@ def main(recording: Path) -> None:
     # (t s, q (6,) rad, p_target (3,) m, R_target (3, 3), tau (6,) N*m) per cycle
     log = []
     try:
-        explore(robot, controller, feed_forward, distribution, ergodic, (x_start, x_first), log)
+        explore(
+            robot, controller, feed_forward, distribution, ergodic, live, (x_start, x_first), log
+        )
     except KeyboardInterrupt:
         print("\ninterrupted, holding current pose")
     finally:
