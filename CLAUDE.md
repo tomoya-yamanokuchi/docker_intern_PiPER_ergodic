@@ -117,15 +117,18 @@ NumPy and JAX), mounted into the container (§7).
 ## 4. `agx_reference/` — the validated implementation
 
 A copy of `kehuanjack/agilex-arm-gravity-compensation`, branch `imp`, checked
-against upstream `HEAD` `8e2545c`. Six Python files, ~800 lines, plus its own
-reduced 6-DoF URDF and meshes:
+against upstream `HEAD` `8e2545c`, plus its own reduced 6-DoF URDF and meshes.
+Eight Python files, ~1100 lines — six of them upstream's, two of them ours
+(`feed_forward.py` and its test, marked below):
 
 ```
 workspace/src/agx_reference/
 ├── core/agx_pinocchio.py              # Pinocchio wrapper: FK, Jacobian, nle, rnea
 ├── controller/
 │   ├── task_imp_controller.py         # CartesianImpedanceController -> joint torques
-│   └── jnt_imp_controller.py          # JointImpedanceController     -> joint torques
+│   ├── jnt_imp_controller.py          # JointImpedanceController     -> joint torques
+│   ├── feed_forward.py                # OURS: gravity correction + inertia + friction
+│   └── test_feed_forward.py           # OURS
 └── piper/
     ├── main_gc.py                     # demo: pure gravity compensation
     ├── main_tast_imp.py               # demo: Cartesian impedance hold  [sic: "tast"]
@@ -133,12 +136,20 @@ workspace/src/agx_reference/
     └── piper/{urdf,meshes}/           # piper_description.urdf, .dae visual, .stl collision
 ```
 
-**Deviation from upstream `HEAD`:** `agx_pinocchio.py` and
-`task_imp_controller.py` are byte-identical. `jnt_imp_controller.py` differs in
-whitespace only. The three `main_*.py` pass `PiperFW.DEFAULT` where upstream
-passes `PiperFW.V189` (this arm's firmware needs `DEFAULT`, §8), with the comment
-`# this arm reports S-V1.8-2` in `main_gc.py` and `main_tast_imp.py`, and
-trailing whitespace stripped. Nothing else.
+`feed_forward.py` sits here rather than beside our own code because it is
+imported as `controller.feed_forward`, the same import root as the two
+controllers it is added to (§5). It is ours, so hard rule 3 does not protect it:
+it is linted and refactored like the rest of our code.
+
+**Deviation from upstream `HEAD`:** `agx_pinocchio.py` is byte-identical.
+`jnt_imp_controller.py` differs in whitespace only. `task_imp_controller.py`
+differs in whitespace and carries one commented-out alternative damping vector
+above its default `set_cart_params` call, left from tuning the ergodic run — dead
+code in an upstream file, and worth deleting rather than extending. The three
+`main_*.py` pass `PiperFW.DEFAULT` where upstream passes `PiperFW.V189` (this
+arm's firmware needs `DEFAULT`, §8), with the comment `# this arm reports
+S-V1.8-2` in `main_gc.py` and `main_tast_imp.py`, and trailing whitespace
+stripped. Nothing else.
 
 The local upstream checkout at `~/agilex-arm-gravity-compensation` carries
 **uncommitted** edits making the same `V189` to `DEFAULT` change, so compare
@@ -204,13 +215,18 @@ the exit handlers, Chinese comments, the redundant `sys.path` insertion at the t
 of each `main_*.py`.
 
 **Not in `agx_reference`:** IK, trajectory generation, logging, visualisation,
-torque or joint-limit bounding, and any moving target. There is **no IK anywhere
-in the tree**. A hand-written closed-form solver (`ik.py`, `ik_closed.py`, with
-`fk.py`, `transform.py`, `model.py`, `selftest.py`) was verified against
-Pinocchio to 2e-16 and round-tripped 5000 random poses; it is in git history
-under `kinematics/`. Recover it rather than writing a new one. Its URDF loader
-locks gripper joints that this 6-joint URDF lacks, so re-pointing it takes an
-edit.
+torque or joint-limit bounding, and any moving target. All of those live beside
+it (§5) where they exist at all.
+
+**IK is `kinematics/kinematic_solver.py`** — closed form by Pieper decoupling,
+which gives up to eight exact branches instead of the one basin a seeded Newton
+iteration finds, over the `peg_tcp` frame. It is hardware-free and used offline
+only: the online loop needs no IK, because the ergodic controller's output is a
+pose the impedance law tracks directly. Its FK and Jacobian come from the same
+`AgxPinocchio` wrapper the controllers use, and `test_kinematic_solver.py` checks
+the Jacobian against a finite difference of that FK and round-trips IK over
+FK-generated poses, including at and near the `q5 = 0` wrist singularity. Use it
+rather than writing another solver.
 
 ---
 
