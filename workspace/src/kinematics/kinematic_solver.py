@@ -144,7 +144,17 @@ class KinematicSolver:
             for q2, q3 in self._solve_q2_q3(p_w, q1):
                 for q4, q5, q6 in self._solve_wrist(target, q1, q2, q3):
                     q = _wrap(np.array([q1, q2, q3, q4, q5, q6]))
-                    if np.all(q >= self.q_min - LIMIT_TOL) and np.all(q <= self.q_max + LIMIT_TOL):
+                    # Only the arm is filtered here. Near q5 = 0 the wrist is
+                    # singular, so the closed form's split of the determined
+                    # q4 + q6 into the two angles is arbitrary and can put one of
+                    # them outside its limit while the pose itself is reachable.
+                    # Clamping and the polish resolve the split; the acceptance
+                    # check throws the branch out if they cannot.
+                    arm = q[:3]
+                    in_limits = np.all(arm >= self.q_min[:3] - LIMIT_TOL) and np.all(
+                        arm <= self.q_max[:3] + LIMIT_TOL
+                    )
+                    if in_limits:
                         branches.append(q)
         return branches
 
