@@ -71,7 +71,7 @@ U_MAX = 3.0  # cube units per second
 # Ceiling on how fast the commanded pose may travel, whatever U_MAX and the
 # demonstration's span between them would ask for. It also bounds the first
 # interval, where the arm can start outside the cube with the setpoint far away.
-MAX_SPEED = 0.05  # m/s
+MAX_SPEED = 0.01  # m/s
 
 R_WORLD_BASE = R.from_euler("xyz", [0, 0, 0], degrees=True).as_matrix()
 
@@ -83,8 +83,8 @@ def make_controller(dofs: int) -> CartesianImpedanceController:
     )
     controller.set_joint_torque_weights(np.array([1.0, 1.0, 1.0, 0.5, 0.5, 0.5]))
     controller.set_cart_params(
-        b=np.array([4.0, 4.0, 4.0, 0.1, 0.1, 0.1]),
-        k=np.array([200.0, 200.0, 200.0, 1.0, 1.0, 1.0]),
+        b=np.array([5.0, 5.0, 5.0, 0.1, 0.1, 0.1]),
+        k=np.array([250.0, 250.0, 300.0, 2.0, 2.0, 1.0]),
     )
     return controller
 
