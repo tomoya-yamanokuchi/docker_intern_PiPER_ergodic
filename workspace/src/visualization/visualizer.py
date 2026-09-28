@@ -13,6 +13,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import meshcat
 import numpy as np
+from matplotlib import colormaps
 
 from controller.feed_forward import STRIBECK_VELOCITY
 from core.agx_pinocchio import AgxPinocchio, helper
@@ -24,6 +25,7 @@ from simulation.meshcat_scene import (
     animate_robot,
     draw_axes,
     draw_datapoints,
+    draw_ellipsoids,
     draw_joint_sweeps,
     draw_pdf_cloud,
     draw_position_distribution,
@@ -48,6 +50,14 @@ POSITION_DIMS = [0, 1, 2]
 ORIENTATION_DIMS = [3, 4, 5]
 LABELS = [f"$X_{i + 1}$ [{unit}]" for i, unit in enumerate(["m"] * 3 + ["rad"] * 3)]
 GRID_POINTS = 100
+
+# The surface drawn for a GMM component stands this many standard deviations out.
+ELLIPSOID_SIGMA = 1.0
+# The orientation marginal lives in half-angle radians, so it has no place in a
+# scene measured in metres: its group is drawn beside the arm, scaled so the
+# widest cube axis spans this, and offset from the centre of the position data.
+ORIENTATION_GROUP_SIZE = 0.3  # m
+ORIENTATION_GROUP_OFFSET = np.array([0.0, 0.5, 0.0])  # m
 
 # Fourier modes and quadrature points per dimension, from the E2T2 notebook.
 ERGODIC_K = 5
@@ -169,6 +179,57 @@ def _sample_marginal(
 def _cube_to_physical(distribution: PoseDistribution, X: np.ndarray, dims: list[int]) -> np.ndarray:
     lower, upper = distribution.lower[dims], distribution.upper[dims]
     return lower + X * (upper - lower)
+
+
+def _ellipsoid_transforms(
+    distribution: PoseDistribution,
+    dims: list[int],  # three cube axes
+    sigma: float,  # how many standard deviations the drawn surface stands at
+) -> np.ndarray:  # (K, 4, 4): the unit sphere onto each component, physical units of dims
+    """One ellipsoid per GMM component, from the marginal over dims.
+
+    Marginalising a GMM is index-slicing, as marginal_pdf has it. The cube-to-
+    physical map is a per-axis scaling, so it is anisotropic and the principal
+    axes have to be taken after it, not before.
+    """
+    span = distribution.upper[dims] - distribution.lower[dims]
+    centres = _cube_to_physical(distribution, distribution.means[:, dims], dims)
+    covariances = distribution.covariances[:, dims][:, :, dims] * np.outer(span, span)
+    return np.array(
+        [
+            _homogeneous(centre, axes * (sigma * np.sqrt(variances)))
+            for centre, (variances, axes) in zip(
+                centres, map(np.linalg.eigh, covariances), strict=True
+            )
+        ]
+    )
+
+
+def _triple(v: np.ndarray) -> str:  # (3,)
+    """Three numbers on a fixed width, so a negative sign cannot shift the column."""
+    return " ".join(f"{x:8.4f}" for x in v)
+
+
+def _print_gmm_components(distribution: PoseDistribution, colors: np.ndarray) -> None:  # (K, 3)
+    """One row per component: its share, where it sits, and how wide it is drawn.
+
+    The orientation semi-axes are doubled into real radians, since the state's
+    orientation part is a half-angle quaternion logarithm.
+    """
+    position = _ellipsoid_transforms(distribution, POSITION_DIMS, ELLIPSOID_SIGMA)
+    orientation = _ellipsoid_transforms(distribution, ORIENTATION_DIMS, ELLIPSOID_SIGMA)
+    print(
+        f"{'k':>2s} {'colour':>8s} {'prior':>6s} {'centre [m]':>26s} "
+        f"{'semi-axes [m]':>26s} {'semi-axes [rad]':>26s}"
+    )
+    for k, prior in enumerate(distribution.priors):
+        radii_p = np.linalg.norm(position[k][:3, :3], axis=0)
+        radii_r = 2.0 * np.linalg.norm(orientation[k][:3, :3], axis=0)
+        hexcolor = "#{:02x}{:02x}{:02x}".format(*(colors[k] * 255).astype(int))
+        print(
+            f"{k:>2d} {hexcolor:>8s} {prior:>6.3f} {_triple(position[k][:3, 3])} "
+            f"{_triple(np.sort(radii_p)[::-1])} {_triple(np.sort(radii_r)[::-1])}"
+        )
 
 
 def _plot_marginal_contour(
@@ -501,6 +562,56 @@ class Visualizer:
         distribution, X_samples = self._fit_distribution(t, q, n_components)
         self._show(distribution, X_samples, t, q)
 
+    def show_gmm_ellipsoids(self, recording_path: Path, n_components: int) -> meshcat.Visualizer:
+        """Every fitted component of a teaching file as its own ellipsoid, in MeshCat.
+
+        The pdf cloud the other views draw throws away which component a sample
+        came from, so it cannot say whether EM put a component where the operator
+        confirmed datapoints. One ellipsoid per component does, and the same
+        colour identifies a component in both groups.
+
+        Position is drawn in the world beside the arm. The orientation marginal
+        is a Gaussian in the tangent space at the demonstration's mean
+        orientation, which is half-angle radians and not metres, so its whole
+        group hangs off one node carrying a scale and an offset; MeshCat composes
+        parent transforms, so the ellipsoids under it stay in tangent units and
+        the triad on it shows the axes they are written in.
+        """
+        t, q = load_recording(recording_path)
+        distribution, X = self._fit_distribution(t, q, n_components)
+        colors = colormaps["turbo"](np.linspace(0.05, 0.95, n_components))[:, :3]
+        _print_gmm_components(distribution, colors)
+
+        viewer = meshcat.Visualizer()
+        print(f"meshcat: {viewer.url()}")
+        show_robot(viewer, self.pin_model.robot, q[0], self.frame_name)
+        draw_datapoints(viewer, _cube_to_physical(distribution, X[:, POSITION_DIMS], POSITION_DIMS))
+        draw_ellipsoids(
+            viewer,
+            "gmm/position",
+            _ellipsoid_transforms(distribution, POSITION_DIMS, ELLIPSOID_SIGMA),
+            colors,
+        )
+
+        span = distribution.upper[ORIENTATION_DIMS] - distribution.lower[ORIENTATION_DIMS]
+        scale = ORIENTATION_GROUP_SIZE / span.max()
+        centre = _cube_to_physical(distribution, np.full(3, 0.5), POSITION_DIMS)
+        placement = _homogeneous(centre + ORIENTATION_GROUP_OFFSET, scale * np.eye(3))
+        viewer["gmm/orientation"].set_transform(placement)
+        draw_axes(viewer["gmm/orientation"], length=0.5 * span.max(), radius=0.002 / scale)
+        draw_ellipsoids(
+            viewer,
+            "gmm/orientation",
+            _ellipsoid_transforms(distribution, ORIENTATION_DIMS, ELLIPSOID_SIGMA),
+            colors,
+        )
+        # Physical rotation is twice the half-angle the tangent space measures.
+        print(
+            f"orientation group at {np.round(centre + ORIENTATION_GROUP_OFFSET, 3)} m, "
+            f"1 rad drawn as {scale / 2:.3f} m"
+        )
+        return viewer
+
     def show_ergodic_trajectory(
         self,
         recording_path: Path,
@@ -585,6 +696,10 @@ if __name__ == "__main__":
         Visualizer().show_ergodic_run(recording)
         raise SystemExit
     # 8 components, as the E2T2 paper selected for its demonstrations.
+    if recording.name.startswith("datapoints_"):
+        Visualizer().show_gmm_ellipsoids(recording, n_components=8)
+        input("Enter to close the viewer: ")
+        raise SystemExit
     # Visualizer().show_pose_distribution(recording, n_components=8)
     Visualizer().show_ergodic_trajectory(recording, 8, 60)
     # Visualizer().show_wall_contact(recording, 8, 60)
