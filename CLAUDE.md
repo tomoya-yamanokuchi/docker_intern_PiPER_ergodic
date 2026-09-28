@@ -11,8 +11,8 @@ tree holding only `agx_reference/`).
 1. **Never run Python that can move the robot.** A real AgileX PiPER arm is
    physically connected. The scripts that open a session with it are
    `agx_reference/piper/main_*.py`, `record_joint_angles.py`,
-   `teach_datapoints.py`, `play_joint_angles.py`, `identify_friction.py` and
-   `run_ergodic_pipeline.py`
+   `teach_datapoints.py`, `play_joint_angles.py`, `identify_friction.py`,
+   `run_ergodic_pipeline.py` and `run_ergodic_trials.py`
    — and, generally, anything that imports `pyAgxArm` or
    `execution.executor_helpers`, or calls `robot.connect()`, `robot.enable()`,
    `move_mit`, `move_p` or `move_j`. The user runs those; Claude writes the code
@@ -118,6 +118,17 @@ over the sequence of trials. The load-bearing part is that a reset moves the arm
 not the statistics: clearing the accumulated coverage at a trial boundary — or
 building each trial on a fresh `ErgodicController` — destroys the very effect the
 experiment exists to show.
+
+`run_ergodic_trials.py` is that experiment, written but **not yet run on the
+arm**. It holds one `ErgodicController` for the whole sequence; Enter confirms an
+insertion, the arm then goes backdrivable so the operator can put it back at the
+pose trial 1 started from, and Enter begins the next trial. The statistic is
+deliberately **not** stepped during that repositioning: the paper's
+re-initialisation is instantaneous, and feeding the operator's handling path to
+the law would mark whatever the peg was dragged through as already explored. The
+metric is the paper's cumulative average `T_c / c`, and the run is accepted if it
+falls. `ergodic_controller/test_ergodic_controller.py::test_statistics_accumulate_across_a_state_reset`
+is the offline guard on the one property all of this rests on.
 
 The E2T2 reference is `~/Ergodic_Exploration_using_Tensor_Train` (two notebooks,
 NumPy and JAX), mounted into the container (§7).
@@ -280,7 +291,8 @@ workspace/src/
 ├── play_joint_angles.py                    # TOUCHES THE ARM: replay under Cartesian impedance
 ├── identify_friction.py                    # TOUCHES THE ARM: friction from sweeps
 ├── make_sweep_recording.py                 # hardware-free: a synthetic recording to replay
-└── run_ergodic_pipeline.py                 # TOUCHES THE ARM: the online peg-in-hole run (§3)
+├── run_ergodic_pipeline.py                 # TOUCHES THE ARM: the online peg-in-hole run (§3)
+└── run_ergodic_trials.py                   # TOUCHES THE ARM: the N-trial experiment (§3, §5)
 ```
 
 There are no `__init__.py` files; these are namespace packages. Every `test_*.py`
@@ -664,9 +676,11 @@ docker exec piper-ergodic bash -lc 'cd /home/jens/workspace/docker_intern_PiPER_
 
 **Visualisation.** `--net=host` makes every viewer reachable from the host
 browser: meshcat `:7000`, matplotlib WebAgg `:8988`, JupyterLab `:8888`. meshcat
-is the default for anything 3D. Static figures go to `workspace/output/`; the one
-writer of them, `direct_teaching/player/tracking_error.py`, selects no backend of
-its own. **The viewer is `visualization/visualizer.py`**, drawing
+is the default for anything 3D. Static figures go to `workspace/output/`; the two
+writers of them, `direct_teaching/player/tracking_error.py` and
+`visualization/visualizer.save_trial_times_plot`, select no backend of their own —
+they build a bare `matplotlib.figure.Figure` and `savefig` it, which renders
+through Agg whatever backend the importing process has chosen. **The viewer is `visualization/visualizer.py`**, drawing
 through `simulation/meshcat_scene.py`; it uses WebAgg rather than `Agg`, since its
 panels are interactive. A new view is a method or a class there, not a new script
 (§5). Two of its classes drive a live loop and both keep their sends on a daemon
@@ -844,8 +858,9 @@ the arm.
   the boundary.
 - **Loop overruns.** A cycle that exceeds its own period prints
   `warning: control loop overrun` — 5 ms in `play_joint_angles.py` at 200 Hz,
-  10 ms in `record_joint_angles.py`, `teach_datapoints.py` and
-  `execution/live_ergodic_controller.py` at 100 Hz. The
+  10 ms in `record_joint_angles.py`, `teach_datapoints.py`,
+  `execution/live_ergodic_controller.py` and `run_ergodic_trials.py`'s
+  backdriving phase, all at 100 Hz. The
   first thing to profile is `read_joint_velocities`: six separate
   `get_motor_states()` calls per cycle.
 - **Never draw to MeshCat from inside a control loop.** A message is a zmq round
@@ -877,6 +892,8 @@ python teach_datapoints.py <dp>.npz      # ... or load that datapoint set and ex
 python play_joint_angles.py <rec>.npz    # replay that recording (path is required)
 python run_ergodic_pipeline.py <rec>.npz # the online run; MeshCat on :7000 (§3)
                                          # <rec> is either kind of teaching file
+python run_ergodic_trials.py <rec>.npz 5 # the same, five trials; Enter confirms an
+                                         # insertion, then place the arm back (§3)
 python identify_friction.py              # friction sweeps, for feed_forward.py
 
 cd agx_reference

@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import meshcat
 import numpy as np
 from matplotlib import colormaps
+from matplotlib.figure import Figure
 
 from controller.feed_forward import STRIBECK_VELOCITY
 from core.agx_pinocchio import AgxPinocchio, helper
@@ -289,6 +290,57 @@ def _plot_cube_axes(t: np.ndarray, X: np.ndarray, distribution: PoseDistribution
     axes[0, 0].set_xlim(t[0], t[-1])
 
 
+def cumulative_average(trial_times: np.ndarray) -> np.ndarray:  # (N,) s -> (N,) s
+    """T_c / c, the metric of the E2T2 paper's Fig. 6.
+
+    The mean time to success over the first c trials, not the c-th trial's own time.
+    Averaging is what makes the trend readable: a single insertion is dominated by
+    where the operator happened to place the arm and by the stochastic contact, while
+    the running mean falls monotonically once exploration starts exploiting its own
+    history.
+    """
+    t = np.asarray(trial_times, dtype=float)
+    return np.cumsum(t) / np.arange(1, len(t) + 1)
+
+
+def trials_accepted(trial_times: np.ndarray) -> bool:  # (N,) s
+    """The paper's criterion: the cumulative average time to success fell over the trials."""
+    averages = cumulative_average(trial_times)
+    return bool(averages[-1] < averages[0])
+
+
+def _plot_trial_times(ax, trial_times: np.ndarray) -> None:  # (N,) s
+    """Per-trial time as markers, the cumulative average as the line through them."""
+    trials = np.arange(1, len(trial_times) + 1)
+    averages = cumulative_average(trial_times)
+    ax.plot(trials, trial_times, "o", color="0.55", markersize=4, label="trial")
+    ax.plot(trials, averages, color="#1f5f99", linewidth=1.2, label="cumulative average")
+    ax.set_xlabel("trial", fontsize=8)
+    ax.set_ylabel("time to insertion [s]", fontsize=8)
+    ax.set_xticks(trials)
+    ax.set_xlim(0.5, len(trial_times) + 0.5)
+    ax.set_ylim(bottom=0.0)
+    ax.tick_params(labelsize=7)
+    ax.grid(color="0.9", linewidth=0.5)
+    ax.legend(fontsize=7, frameon=False)
+
+
+def save_trial_times_plot(trial_times: np.ndarray, path: Path) -> None:  # (N,) s
+    """One IEEE column of the trial times, written to path.
+
+    Bare Figure rather than pyplot, as direct_teaching/player/tracking_error.py does
+    it: this module selects WebAgg at import, and the object-oriented API renders
+    through Agg on savefig regardless, so a live run can write the figure without a
+    display and without disturbing the interactive views.
+    """
+    fig = Figure(figsize=(3.5, 2.8), layout="constrained")
+    ax = fig.subplots()
+    _plot_trial_times(ax, trial_times)
+    verdict = "accepted" if trials_accepted(trial_times) else "not accepted"
+    fig.suptitle(f"Time to insertion over trials: {verdict}", fontsize=9)
+    fig.savefig(path, dpi=300)
+
+
 def _homogeneous(p: np.ndarray, R: np.ndarray) -> np.ndarray:  # (3,) m, (3, 3) -> (4, 4)
     transform = np.eye(4)
     transform[:3, :3] = R
@@ -556,6 +608,31 @@ class Visualizer:
         print("matplotlib: http://127.0.0.1:8988")
         plt.show()
 
+    def show_trial_times(self, trials_path: Path) -> None:
+        """The result of the trialled experiment: an ergodic_trials_*.npz from run_ergodic_trials.py.
+
+        The stored W cores are not read here -- they are for analysing the coverage
+        itself. What this shows is the measurement: whether the time to insertion
+        fell as the ergodic controller accumulated history across the trials.
+        """
+        with np.load(trials_path) as trials:
+            trial_times = trials["trial_times"]
+            step_counts = trials["step_counts"]
+        averages = cumulative_average(trial_times)
+        print("trial   time [s]   cumulative average [s]   ergodic steps")
+        for trial, (seconds, average, steps) in enumerate(
+            zip(trial_times, averages, step_counts, strict=True), start=1
+        ):
+            print(f"{trial:5d}   {seconds:8.1f}   {average:22.1f}   {steps:13d}")
+        verdict = "accepted" if trials_accepted(trial_times) else "not accepted"
+        print(f"cumulative average {averages[0]:.1f} s -> {averages[-1]:.1f} s: {verdict}")
+
+        fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
+        fig.suptitle(f"Time to insertion over trials: {verdict}")
+        _plot_trial_times(ax, trial_times)
+        print("matplotlib: http://127.0.0.1:8988")
+        plt.show()
+
     def show_pose_distribution(self, recording_path: Path, n_components: int) -> None:
         """Fit a PoseDistribution to one recording and show its marginals with the recording on top."""
         t, q = load_recording(recording_path)
@@ -694,6 +771,9 @@ if __name__ == "__main__":
     recording = args.recording or sorted(OUTPUT_DIR.glob("joint_angles_*.npz"))[-1]
     if recording.name.startswith("ergodic_run_"):
         Visualizer().show_ergodic_run(recording)
+        raise SystemExit
+    if recording.name.startswith("ergodic_trials_"):
+        Visualizer().show_trial_times(recording)
         raise SystemExit
     # 8 components, as the E2T2 paper selected for its demonstrations.
     if recording.name.startswith("datapoints_"):

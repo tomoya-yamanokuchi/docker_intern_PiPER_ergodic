@@ -97,6 +97,37 @@ def test_exploration_reduces_true_ergodic_metric() -> None:
     assert metrics[-1] < 0.5 * metrics[0], metrics
 
 
+def test_statistics_accumulate_across_a_state_reset() -> None:
+    """The property run_ergodic_trials.py rests on: a trial boundary moves the state, not W.
+
+    Three segments with the state teleported between them, as the operator moving the
+    arm back to the start pose does. Against the dense sum of phi over every state of
+    every segment, computed here from the basis definition rather than from the
+    controller: a controller that cleared tt_wt or step_count at a boundary would hold
+    only the last segment, which the second assertion pins down.
+
+    Kept to 90 steps so the coarse rounding at (step_count + 1) % int(100/u_max) == 0
+    never fires; what remains is the eps=1e-4 rounding every fifth step.
+    """
+    controller = ErgodicController(_gaussian_pdf, D, K, N, u_max=1.0)
+    phi_sum, phi_last = np.zeros((K, K)), np.zeros((K, K))
+    for start in (np.array([0.2, 0.2]), np.array([0.8, 0.7]), np.array([0.5, 0.15])):
+        phi_last = np.zeros((K, K))
+        x = start
+        for _ in range(30):
+            phi_sum += _phi(x)
+            phi_last += _phi(x)
+            x = controller.step(x, 0.01)
+
+    assert controller.step_count == 90, controller.step_count
+    accumulated = controller.tt_wt.full()
+    error = np.linalg.norm(accumulated - phi_sum) / np.linalg.norm(phi_sum)
+    assert error < 1e-3, error
+    # Teeth: resetting at each boundary would leave only the last segment's 30 states.
+    reset_error = np.linalg.norm(accumulated - phi_last) / np.linalg.norm(phi_last)
+    assert reset_error > 0.5, reset_error
+
+
 if __name__ == "__main__":
     for name, test in list(globals().items()):
         if name.startswith("test_"):
