@@ -216,7 +216,7 @@ and what `play_joint_angles.py` sets:
 
 **The local `main_tast_imp.py` no longer uses that set** — it lowers `k` on y and
 z to 100 and the joint 4–6 weights to 0.5, as listed in the deviations above. The
-ergodic run uses a third set again (§3, `run_ergodic_pipeline.make_controller`).
+ergodic run uses a third set again (§3, `execution/live_ergodic_controller.make_controller`).
 So read the gains from the file you are about to run, not from this table.
 
 Every demo holds the pose it starts in. `R_world_base` is the identity (base
@@ -259,7 +259,9 @@ rather than writing another solver.
 ```
 workspace/src/
 ├── agx_reference/                          # §4; ours there is feed_forward.py
-├── execution/executor_helpers.py           # pyAgxArm I/O          (TOUCHES THE ARM)
+├── execution/                              # TOUCHES THE ARM
+│   ├── executor_helpers.py                 # pyAgxArm I/O: connect, read, command, hold
+│   └── live_ergodic_controller.py          # the exploration loop, gains and rates (§5)
 ├── direct_teaching/                        # hardware-free
 │   ├── recorder/joint_angle_recorder.py    # JointAngleRecorder, load_recording
 │   ├── player/joint_angle_player.py        # JointAnglePlayer: recording -> q(t)
@@ -302,6 +304,34 @@ would silently clamp to `±8*b*c` and print a warning (§8), and a clamped joint
 lost its damping and oscillates at the limit, so `apply_joint_torques` raises
 instead and lets the caller's `finally` hold the arm. A run that ends this way is
 a gain problem, not a glitch.
+
+### `execution/live_ergodic_controller.py`
+
+The exploration loop itself, shared by `run_ergodic_pipeline.py` (one open-ended
+run) and `run_ergodic_trials.py` (the N-trial experiment), so that **the tuned
+Cartesian gains, `U_MAX`, `MAX_SPEED`, `ERGODIC_K/N` and the two loop rates exist
+in exactly one place**. It used to live inside `run_ergodic_pipeline.py`; a change
+to a gain is now a change to this file and nothing else. Its module docstring
+carries the design rationale that the pipeline's used to.
+
+| name | is |
+|---|---|
+| `Exploration` | the dataclass of collaborators that live for a whole run: controller, feed forward, distribution, ergodic controller, `LiveView` |
+| `prepare_exploration(recording)` | all the offline work — fit, coefficients, MeshCat scene — before the arm is touched |
+| `first_setpoints(exploration, q)` | where the interpolator starts and the first setpoint one ergodic step from it; **it accumulates one `Phi(x)`** |
+| `explore(robot, exploration, setpoints, log, stop=None)` | the loop; returns the seconds it ran |
+| `save_run(log, recording, label="")` | `output/ergodic_run_<ts><label>.npz`, read by `show_ergodic_run` |
+
+`stop` is polled once per cycle **after the torque has gone out**, never before,
+so nothing it does can delay a torque. `None` is an open-ended run ending only on
+Ctrl-C; the trials script passes a predicate that fires on the operator's Enter.
+The timestamp in `save_run` resolves to a second, which is why `label` exists:
+without it two trials finishing in the same second overwrite each other.
+
+The arm-touching code here is deliberate and is the second exception to "only a
+top-level script touches the arm", after `executor_helpers.py`. It is why this
+module sits in `execution/` and not in `ergodic_controller/`, which stays SDK-free
+so the E2T2 law and its tests keep running with no arm present.
 
 ### Recording — `record_joint_angles.py`
 
@@ -815,7 +845,7 @@ the arm.
 - **Loop overruns.** A cycle that exceeds its own period prints
   `warning: control loop overrun` — 5 ms in `play_joint_angles.py` at 200 Hz,
   10 ms in `record_joint_angles.py`, `teach_datapoints.py` and
-  `run_ergodic_pipeline.py` at 100 Hz. The
+  `execution/live_ergodic_controller.py` at 100 Hz. The
   first thing to profile is `read_joint_velocities`: six separate
   `get_motor_states()` calls per cycle.
 - **Never draw to MeshCat from inside a control loop.** A message is a zmq round
