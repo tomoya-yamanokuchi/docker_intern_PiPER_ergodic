@@ -131,6 +131,10 @@ real bib entry.
 | $\mathbf{r} = [r_s\ \mathbf{r}_v^\top]^\top$, $\boldsymbol{\mu}$, $\operatorname{Log}_{\mathbf{g}}$, $\operatorname{Exp}_{\mathbf{g}}$ | unit quaternion ($\mathbf{q}$ is taken), mean orientation, half-angle quaternion maps at $\mathbf{g}$ |
 | $f_{\mathrm{c},i}$, $f_{\mathrm{s},i}$, $v_{\mathrm{s},i}$, $\boldsymbol{\tau}_{\mathrm{fw}}$ | Coulomb and static friction [N m], Stribeck velocity [rad/s], inertia + friction feedforward torque |
 | $\mathcal{G}^{i}$, $r_i$, $\mathcal{I}_i$, $\mathcal{J}_i$, $\kappa$, $\delta$ | TT core, TT rank, TT-cross left / right index sets, rank increment (kickrank), relative tolerance |
+| $\ell$, $\Delta t_{\mathrm{e}}$, $\tilde{\mathbf{x}}$, $\sigma$, $v_{\max}$ | ergodic step index ($j$ is the quadrature index), ergodic period [s], commanded (interpolated) state, speed-cap scale, peg-tip speed cap [m/s] |
+| $\boldsymbol{\omega}$, $\mathbf{h}$, $\alpha$, $\beta$ | per-axis weight of the ergodic command, pull back into the cube, its sharpness and boundary band width |
+| $\mathbf{W}$, $\boldsymbol{\nu}$, $\operatorname{Log}_{\mathrm{SO}(3)}$ | joint torque weights, twist [m/s, rad/s], rotation matrix to full-angle rotation vector (distinct from the half-angle quaternion $\operatorname{Log}$) |
+| $\boldsymbol{\gamma}$, $\mathbf{g}(\mathbf{q})$, $N_{\mathrm{p}}$, $w_m$ | gravity scale, modelled gravity torque $\mathbf{n}(\mathbf{q}, \mathbf{0})$, number of datapoints ($M$ is taken by the mass matrix), GMM sample weight |
 
 Add a row here when a new symbol becomes part of the project (for example the
 ergodic metric or the target distribution), so later reports inherit it.

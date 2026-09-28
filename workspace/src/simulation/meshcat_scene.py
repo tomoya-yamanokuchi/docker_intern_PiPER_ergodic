@@ -12,6 +12,7 @@ from meshcat.animation import Animation
 from pinocchio.visualize import MeshcatVisualizer
 
 PDF_OPACITY = 0.3
+ELLIPSOID_OPACITY = 0.35
 
 
 def draw_axes(viewer: meshcat.Visualizer, length: float, radius: float) -> None:  # m
@@ -64,6 +65,35 @@ def draw_position_distribution(
     """Draws from the pdf coloured by log density, and the recorded flange positions in black."""
     draw_pdf_cloud(viewer, pdf_p, log_density)
     draw_datapoints(viewer, p_samples)
+
+
+def _packed_rgb(color: np.ndarray) -> int:  # (3,) RGB in 0-1
+    """A mesh material takes its colour as one 0xRRGGBB int, not as three floats."""
+    r, g_, b = (np.clip(color, 0.0, 1.0) * 255).astype(int)
+    return int(r) << 16 | int(g_) << 8 | int(b)
+
+
+def draw_ellipsoids(
+    viewer: meshcat.Visualizer,
+    name: str,  # viewer path of the group holding one child per ellipsoid
+    transforms: np.ndarray,  # (K, 4, 4): the unit sphere onto the ellipsoid
+    colors: np.ndarray,  # (K, 3) RGB in 0-1
+) -> None:
+    """One translucent ellipsoid per transform, each the unit sphere under it.
+
+    A meshcat Ellipsoid is itself a unit sphere carrying a diagonal scale, so
+    folding the semi-axes into the transform loses nothing and lets the caller
+    pass a rotation and a scale in the one array.
+    """
+    for k, (transform, color) in enumerate(zip(transforms, colors, strict=True)):
+        node = viewer[f"{name}/{k}"]
+        node.set_object(
+            g.Sphere(1.0),
+            g.MeshLambertMaterial(
+                color=_packed_rgb(color), opacity=ELLIPSOID_OPACITY, transparent=True
+            ),
+        )
+        node.set_transform(transform)
 
 
 def draw_tcp_paths(
