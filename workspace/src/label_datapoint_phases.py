@@ -26,11 +26,12 @@ URDF_PATH = (
 def main(master_path: Path, datapoints_path: Path) -> None:
     _, q = load_recording(datapoints_path)
     context = phase_context(master_path, q, AgxPinocchio(str(URDF_PATH)))
-    phi = project(context.S, context.S_master, context.phi_master, context.scale)
+    phi = project(context.p, context.p_master, context.phi_master)
 
     print(f"master: {len(context.phi_master)} samples; datapoints: {len(q)}")
-    print(f"per-axis std [m m m rad rad rad]: {np.round(context.scale, 4)}")
-    print(f"k = {context.k}, h = {context.h:.3f}, dl/dphi = {context.dl_dphi:.1f}")
+    print(
+        f"k = {context.k}, h = {1000 * context.h:.1f} mm, dl/dphi = {1000 * context.dl_dphi:.0f} mm"
+    )
     print(f"sigma_f = lead = {context.sigma_f:.4f}")
     counts, _ = np.histogram(phi, bins=10, range=(0.0, 1.0))
     print(f"datapoints per phi decile: {counts.tolist()}")

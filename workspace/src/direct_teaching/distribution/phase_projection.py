@@ -5,19 +5,19 @@ recorded with record_joint_angles.py, and its phase is its normalised time
 t / T: a pause while pressing or turning keeps its own share of phi, where a
 phase by arc length would collapse it to almost nothing.
 
-A datapoint's phase is that of the nearest master sample in the E2T2 state
-[p, Log_mu(quat)] of peg_tcp, each axis divided by its standard deviation over
-the datapoints so that neither metres nor radians win by their unit.
+A datapoint's phase is that of the nearest master sample by peg_tcp position
+alone, in plain Euclidean metres. Both normalisations tried before stalled the
+phase on the arm: dividing each axis by the datapoints' spread let the wrist's
+tilt, then the few millimetres of height, outweigh centimetres of progress
+along the path.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 
 from core.agx_pinocchio import AgxPinocchio
-from direct_teaching.distribution.pose_distribution import PoseDistribution
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 
 TCP_FRAME_NAME = "peg_tcp"
@@ -25,33 +25,20 @@ TCP_FRAME_NAME = "peg_tcp"
 
 @dataclass
 class PhaseContext:
-    """The datapoints and the master in one state space, and the parameters derived from them."""
+    """The datapoints' and the master's TCP positions, and the parameters derived from them."""
 
     p: np.ndarray  # (M, 3) m, datapoint TCP positions
-    S: np.ndarray  # (M, 6) datapoint states
     q_master: np.ndarray  # (N, 6) rad
     p_master: np.ndarray  # (N, 3) m
-    S_master: np.ndarray  # (N, 6)
     phi_master: np.ndarray  # (N,)
-    scale: np.ndarray  # (6,) per-axis std of the datapoint states
     k: int
-    h: float  # scaled state units
-    dl_dphi: float  # scaled state units per unit phase
+    h: float  # m
+    dl_dphi: float  # m per unit phase
     sigma_f: float
 
 
-def tcp_poses(
-    pin_model: AgxPinocchio, q: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:  # (N, 6) rad -> (N, 3) m, (N, 4) scalar first
-    poses = [pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q]
-    p = np.array([p_i for p_i, _ in poses])
-    rotations = np.array([R_i for _, R_i in poses])
-    return p, Rotation.from_matrix(rotations).as_quat(scalar_first=True)
-
-
-def pose_states(p: np.ndarray, quaternions: np.ndarray, mu: np.ndarray) -> np.ndarray:  # (N, 6)
-    """[p, Log_mu(quat)], unscaled: m and half-angle rad."""
-    return np.hstack([p, [PoseDistribution.quaternion_log(q, mu) for q in quaternions]])
+def tcp_positions(pin_model: AgxPinocchio, q: np.ndarray) -> np.ndarray:  # (N, 6) rad -> (N, 3) m
+    return np.array([pin_model.forward_kinematics(q_i, TCP_FRAME_NAME)[0] for q_i in q])
 
 
 def master_phases(t: np.ndarray) -> np.ndarray:  # (N,) s -> (N,) in [0, 1]
@@ -59,17 +46,16 @@ def master_phases(t: np.ndarray) -> np.ndarray:  # (N,) s -> (N,) in [0, 1]
 
 
 def project(
-    S: np.ndarray,  # (M, 6)
-    S_master: np.ndarray,  # (N, 6)
+    p: np.ndarray,  # (M, 3) m
+    p_master: np.ndarray,  # (N, 3) m
     phi_master: np.ndarray,  # (N,)
-    scale: np.ndarray,  # (6,)
 ) -> np.ndarray:  # (M,)
-    """Phase of the nearest master sample to each state, in the scaled metric; the first on ties."""
-    d2 = (((S[:, None, :] - S_master[None, :, :]) / scale) ** 2).sum(axis=2)
+    """Phase of the nearest master sample to each position, in metres; the first on ties."""
+    d2 = ((p[:, None, :] - p_master[None, :, :]) ** 2).sum(axis=2)
     return phi_master[np.argmin(d2, axis=1)]
 
 
-def neighbour_distance(X: np.ndarray) -> tuple[int, float]:  # (M, d) scaled states
+def neighbour_distance(X: np.ndarray) -> tuple[int, float]:  # (M, d)
     """k = round(sqrt(M)) and h, the median distance to the k-th nearest neighbour."""
     k = round(np.sqrt(len(X)))
     d = np.linalg.norm(X[:, None, :] - X[None, :, :], axis=2)
@@ -119,24 +105,15 @@ def phase_context(
     master_path: Path, q: np.ndarray, pin_model: AgxPinocchio
 ) -> PhaseContext:  # q (M, 6) rad, the datapoints
     t_master, q_master = load_recording(master_path)
-    p, quaternions = tcp_poses(pin_model, q)
-    p_master, quaternions_master = tcp_poses(pin_model, q_master)
-    # The datapoints' mean orientation, for the master as well: one tangent space for both.
-    mu = PoseDistribution.quaternion_mean(quaternions)
-    S = pose_states(p, quaternions, mu)
-    S_master = pose_states(p_master, quaternions_master, mu)
-    scale = S.std(axis=0)
-    k, h = neighbour_distance(S / scale)
-    # phi spans 1, so the master's scaled length is its length per unit phase.
-    dl_dphi = float(np.linalg.norm(np.diff(S_master / scale, axis=0), axis=1).sum())
+    p, p_master = tcp_positions(pin_model, q), tcp_positions(pin_model, q_master)
+    k, h = neighbour_distance(p)
+    # phi spans 1, so the master's length is its length per unit phase.
+    dl_dphi = float(np.linalg.norm(np.diff(p_master, axis=0), axis=1).sum())
     return PhaseContext(
         p=p,
-        S=S,
         q_master=q_master,
         p_master=p_master,
-        S_master=S_master,
         phi_master=master_phases(t_master),
-        scale=scale,
         k=k,
         h=h,
         dl_dphi=dl_dphi,
