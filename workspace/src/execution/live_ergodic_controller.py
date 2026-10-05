@@ -148,10 +148,10 @@ def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -
     task = PhaseTask(
         X=to_cube(q),
         phi=phi,
-        X_master=to_cube(context.q_master),
+        P_master=to_cube(context.q_master)[:, :3],
         phi_master=context.phi_master,
-        # The datapoints' per-axis std in cube units: the same metric as the labelling's.
-        scale=context.scale / (distribution.upper - distribution.lower),
+        # The cube scales each axis differently; back to metres, as the labelling projects.
+        span=distribution.upper[:3] - distribution.lower[:3],
         sigma_f=context.sigma_f,
     )
     print(f"phase: {len(q)} datapoints, sigma_f = lead = {context.sigma_f:.4f}, beta = {beta:g}")

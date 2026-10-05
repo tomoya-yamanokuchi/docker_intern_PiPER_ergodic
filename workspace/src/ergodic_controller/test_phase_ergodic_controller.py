@@ -31,9 +31,9 @@ def _frozen_task(X: np.ndarray) -> PhaseTask:
     return PhaseTask(
         X=X,
         phi=np.zeros(len(X)),
-        X_master=np.full((1, 6), 0.5),
+        P_master=np.full((1, 3), 0.5),
         phi_master=np.zeros(1),
-        scale=np.ones(6),
+        span=np.ones(3),
         sigma_f=0.05,
     )
 
@@ -87,20 +87,20 @@ def test_sigma_b_grows_with_the_stall_to_its_ceiling() -> None:
 
 def test_phase_estimate_is_monotone_windowed_and_hysteretic() -> None:
     phi_master = np.linspace(0.0, 1.0, 101)
-    X_master = np.full((101, 6), 0.5)
-    X_master[:, 0] = 0.1 + 0.8 * phi_master
+    P_master = np.full((101, 3), 0.5)
+    P_master[:, 0] = 0.1 + 0.8 * phi_master
     task = PhaseTask(
         RNG.uniform(0.3, 0.7, (10, 6)),
         RNG.uniform(0, 1, 10),
-        X_master,
+        P_master,
         phi_master,
-        np.full(6, 0.1),
+        np.full(3, 0.1),
         0.04,
     )
     phase = PhaseErgodicController(task, u_max=1.0, K=K)
 
     def at(phi: float) -> np.ndarray:
-        return X_master[round(phi * 100)]
+        return np.concatenate([P_master[round(phi * 100)], np.full(3, 0.5)])
 
     phase.step(at(0.10), 0.01)
     assert np.isclose(phase.phi, 0.10)

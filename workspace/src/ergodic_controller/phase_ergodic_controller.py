@@ -41,9 +41,9 @@ class PhaseTask:
 
     X: np.ndarray  # (M, 6) datapoint cube states
     phi: np.ndarray  # (M,) their phase labels
-    X_master: np.ndarray  # (N, 6) master cube states
+    P_master: np.ndarray  # (N, 3) master cube positions
     phi_master: np.ndarray  # (N,) master phases, t / T
-    scale: np.ndarray  # (6,) projection metric: per-axis std of X
+    span: np.ndarray  # (3,) m per cube unit on the position axes, so the projection is in metres
     sigma_f: float
 
 
@@ -102,11 +102,11 @@ class PhaseErgodicController:
         return self.beta * float(np.exp(-(d**2) / (2 * self.task.sigma_f**2)).sum())
 
     def _advance_phase(self, x: np.ndarray) -> None:
-        """Monotone, windowed nearest-sample projection, with sigma_f / 4 hysteresis."""
+        """Monotone, windowed nearest-sample projection by position in metres, with sigma_f / 4 hysteresis."""
         task = self.task
         lo, hi = max(0.0, self.phi - PHASE_WINDOW[0]), min(1.0, self.phi + PHASE_WINDOW[1])
         window = (task.phi_master >= lo) & (task.phi_master <= hi)
-        d2 = (((task.X_master[window] - x) / task.scale) ** 2).sum(axis=1)
+        d2 = (((task.P_master[window] - x[:3]) * task.span) ** 2).sum(axis=1)
         phi_hat = float(task.phi_master[window][np.argmin(d2)])
         if phi_hat > self.phi + task.sigma_f / 4:
             if int(phi_hat / EVENT_STEP) > int(self.phi / EVENT_STEP):
