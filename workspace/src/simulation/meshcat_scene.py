@@ -179,3 +179,58 @@ def animate_robot(
             frame["tcp"].set_transform(tcp_data.oMf[tcp_id].homogeneous)
     robot_view.viewer = viewer
     viewer.set_animation(animation, repetitions=math.inf)
+
+
+# One phase frame: phi, the arm's q (6,) rad, and named clouds of points p (n, 3) m
+# with a value (n,) each, drawn with a point size in m.
+PhaseFrame = tuple[float, np.ndarray, dict[str, tuple[np.ndarray, np.ndarray, float]]]
+
+
+def _draw_phase_clouds(viewer: meshcat.Visualizer, frames: list[PhaseFrame]) -> None:
+    """Every frame's clouds, coloured by value, viridis over each cloud's own maximum; only frame 0 visible."""
+    for i, (_, _, layers) in enumerate(frames):
+        for name, (p, value, size) in layers.items():
+            color = colormaps["viridis"](value / value.max())[:, :3]
+            node = viewer[f"phase/{name}/{i}"]
+            node.set_object(
+                g.PointCloud(p.T.astype(np.float32), color.T.astype(np.float32), size=size)
+            )
+            node.set_property("visible", i == 0)
+
+
+def animate_phase_distribution(
+    viewer: meshcat.Visualizer,
+    robot: pin.RobotWrapper,
+    frames: list[PhaseFrame],
+    p_master: np.ndarray,  # (N, 3) m
+    tcp_frame: str,
+) -> None:
+    """Point clouds per phase, shown one frame at a time by the paused animation's time scrubber.
+
+    Keyed at time phi with a framerate of 1, so the scrubber reads phi itself. At
+    each frame the arm stands in that frame's q and only that frame's clouds are
+    visible. A point cloud's colours cannot be animated, which is why each frame
+    has clouds of its own.
+    """
+    colors = np.tile(np.array([1.0, 0.0, 0.0], np.float32), (len(p_master), 1))
+    viewer["phase/master"].set_object(
+        g.PointCloud(p_master.T.astype(np.float32), colors.T, size=0.002)
+    )
+    _draw_phase_clouds(viewer, frames)
+
+    robot_view = show_robot(viewer, robot, frames[0][1], tcp_frame)
+    tcp_id = robot.model.getFrameId(tcp_frame)
+    tcp_data = robot.model.createData()
+    animation = Animation(default_framerate=1)
+    for i, (phi, q, layers) in enumerate(frames):
+        with animation.at_frame(viewer, phi) as frame:
+            robot_view.viewer = frame
+            robot_view.display(q)
+            pin.framesForwardKinematics(robot.model, tcp_data, q)
+            frame["tcp"].set_transform(tcp_data.oMf[tcp_id].homogeneous)
+            # Visibility steps between keys, so a cloud needs keys only at its neighbours.
+            for j in range(max(i - 1, 0), min(i + 2, len(frames))):
+                for name in layers:
+                    frame[f"phase/{name}/{j}"].set_property("visible", "boolean", j == i)
+    robot_view.viewer = viewer
+    viewer.set_animation(animation, play=False)

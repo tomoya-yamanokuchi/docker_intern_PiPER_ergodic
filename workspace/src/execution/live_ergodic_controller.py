@@ -42,9 +42,11 @@ from scipy.spatial.transform import Rotation as R
 
 from controller.feed_forward import FeedForward
 from controller.task_imp_controller import CartesianImpedanceController, orientation_error
+from direct_teaching.distribution.phase_projection import phase_context
 from direct_teaching.distribution.pose_distribution import PoseDistribution
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 from ergodic_controller.ergodic_controller import ErgodicController
+from ergodic_controller.phase_ergodic_controller import PhaseErgodicController, PhaseTask
 from execution.executor_helpers import apply_joint_torques, read_joint_velocities
 from visualization.visualizer import LiveView
 
@@ -82,7 +84,7 @@ class Exploration:
     controller: CartesianImpedanceController
     feed_forward: FeedForward
     distribution: PoseDistribution
-    ergodic: ErgodicController
+    ergodic: ErgodicController | PhaseErgodicController
     live: LiveView
 
 
@@ -122,6 +124,44 @@ def prepare_exploration(recording: Path) -> Exploration:
         distribution=distribution,
         ergodic=ergodic,
         live=live,
+    )
+
+
+def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -> Exploration:
+    """prepare_exploration with the phase-conditioned law, before the arm is touched.
+
+    labelled is a file from label_datapoint_phases.py. The datapoints' GMM is
+    fitted only for its cube, so the gains, MAX_SPEED and the interpolator see the
+    same coordinates as in run_ergodic_pipeline.py; the law itself uses the
+    datapoints directly.
+    """
+    controller = make_controller(dofs=6)
+    with np.load(labelled) as data:
+        q, phi = data["q"], data["phi"]
+    distribution = fit_distribution(controller, np.arange(len(q), dtype=float), q)
+    context = phase_context(master, q, controller.pin_model)
+
+    def to_cube(q_rows: np.ndarray) -> np.ndarray:  # (n, 6) rad -> (n, 6) cube
+        poses = (controller.pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q_rows)
+        return np.array([distribution.pose_to_state(p_i, R_i) for p_i, R_i in poses])
+
+    task = PhaseTask(
+        X=to_cube(q),
+        phi=phi,
+        X_master=to_cube(context.q_master),
+        phi_master=context.phi_master,
+        # The datapoints' per-axis std in cube units: the same metric as the labelling's.
+        scale=context.scale / (distribution.upper - distribution.lower),
+        sigma_f=context.sigma_f,
+    )
+    print(f"phase: {len(q)} datapoints, sigma_f = lead = {context.sigma_f:.4f}, beta = {beta:g}")
+    law = PhaseErgodicController(task, U_MAX, beta, ERGODIC_K)
+    return Exploration(
+        controller=controller,
+        feed_forward=FeedForward(urdf_path=str(URDF_PATH), dofs=6),
+        distribution=distribution,
+        ergodic=law,
+        live=LiveView(distribution, URDF_PATH, TCP_FRAME_NAME, phase_law=law),
     )
 
 
@@ -214,14 +254,21 @@ def print_progress(
     q: np.ndarray,  # (6,) rad
     p_target: np.ndarray,  # (3,) m
 ) -> None:
-    """Every 20th ergodic step: ergodic_metric is a tensor-train norm, too slow for the loop."""
+    """Every 20th ergodic step: ergodic_metric is a tensor-train norm, too slow for the loop.
+
+    The phase law prints its phase state instead, which costs nothing: its metric
+    needs the dense K^6 difference of target and statistic, 20 to 75 ms at a few
+    thousand past states, several control cycles.
+    """
     if exploration.ergodic.step_count % 20:
         return
     p_tcp, _ = exploration.controller.pin_model.forward_kinematics(q, TCP_FRAME_NAME)
-    print(
-        f"position error {np.linalg.norm(p_target - p_tcp):.5f} m, "
-        f"ergodic metric {exploration.ergodic.ergodic_metric():.4f}"
-    )
+    if isinstance(exploration.ergodic, PhaseErgodicController):
+        phi, sigma_b, stall_over_T = exploration.ergodic.trace[-1]
+        status = f"phi {phi:.3f}, sigma_b {sigma_b:.3f}, stall/T {stall_over_T:.2f}"
+    else:
+        status = f"ergodic metric {exploration.ergodic.ergodic_metric():.4f}"
+    print(f"position error {np.linalg.norm(p_target - p_tcp):.5f} m, {status}")
 
 
 def save_run(log: list[tuple], recording: Path, label: str = "") -> None:
