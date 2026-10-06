@@ -18,11 +18,20 @@ from matplotlib.figure import Figure
 
 from controller.feed_forward import STRIBECK_VELOCITY
 from core.agx_pinocchio import AgxPinocchio, helper
+from direct_teaching.distribution.phase_projection import (
+    LEAD_SCALE,
+    coefficient_density,
+    phase_context,
+    phase_weights,
+    position_coefficients,
+)
 from direct_teaching.distribution.pose_distribution import PoseDistribution
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 from ergodic_controller.ergodic_controller import ErgodicController
+from ergodic_controller.phase_ergodic_controller import PhaseErgodicController
 from kinematics.kinematic_solver import KinematicSolver
 from simulation.meshcat_scene import (
+    animate_phase_distribution,
     animate_robot,
     draw_axes,
     draw_datapoints,
@@ -30,7 +39,9 @@ from simulation.meshcat_scene import (
     draw_joint_sweeps,
     draw_pdf_cloud,
     draw_position_distribution,
+    draw_start_goal,
     draw_tcp_paths,
+    open_viewer,
     show_robot,
 )
 
@@ -43,6 +54,16 @@ URDF_PATH = SRC / "agx_reference/piper/piper/urdf/piper_description.urdf"
 OUTPUT_DIR = SRC.parent / "output"
 
 PDF_POINTS = 5000
+# Phases the slider steps through, 0 to 1, and the weight below which a datapoint,
+# relative to the heaviest, is left out of that phase's cloud.
+PHASE_FRAMES = 101
+PHASE_WEIGHT_FLOOR = 1e-3
+# Fourier modes per axis of the phase target, as the online controller runs
+# (execution/live_ergodic_controller.ERGODIC_K), and the grid it is drawn on: cells
+# per cube axis, keeping those above this share of the frame's peak density.
+PHASE_K = 10
+PHASE_GRID = 25
+PHASE_DENSITY_FLOOR = 0.2
 # LiveView frames between one trail point and the next; the trail is resent whole.
 TRAIL_DECIMATION = 5
 # How long LiveView's drawing thread waits when the caller has handed it nothing.
@@ -175,6 +196,25 @@ def _sample_marginal(
     covariances = distribution.covariances[:, dims][:, :, dims]
     draws = zip(means, covariances, counts, strict=True)
     return np.concatenate([rng.multivariate_normal(m, c, k) for m, c, k in draws])
+
+
+def _phase_density_cloud(
+    distribution: PoseDistribution,
+    X: np.ndarray,  # (M, 3) cube positions of the datapoints
+    w: np.ndarray,  # (M,) their target weights, summing to 1
+    K: int,
+) -> tuple[np.ndarray, np.ndarray]:  # (n, 3) m, (n,) density
+    """The K-mode Fourier series of the weighted datapoints, position marginal, on a grid.
+
+    What the ergodic law tracks, not the datapoints themselves: cells of a
+    PHASE_GRID^3 grid over the cube, those below PHASE_DENSITY_FLOOR of the peak
+    left out, which also drops the series' negative ringing.
+    """
+    axis = (np.arange(PHASE_GRID) + 0.5) / PHASE_GRID
+    grid = np.stack(np.meshgrid(axis, axis, axis, indexing="ij"), axis=-1).reshape(-1, 3)
+    density = coefficient_density(position_coefficients(X, w, K), axis).ravel()
+    dense = density > PHASE_DENSITY_FLOOR * density.max()
+    return _cube_to_physical(distribution, grid[dense], POSITION_DIMS), density[dense]
 
 
 def _cube_to_physical(distribution: PoseDistribution, X: np.ndarray, dims: list[int]) -> np.ndarray:
@@ -378,24 +418,31 @@ class LiveView:
         distribution: PoseDistribution,
         urdf_path: Path = URDF_PATH,
         frame_name: str = "peg_tcp",
+        phase_law: PhaseErgodicController | None = None,
+        master_ends: np.ndarray | None = None,  # (2, 3) m, the master's start and goal
     ):
         self.pin_model = AgxPinocchio(str(urdf_path))
+        self.distribution, self.phase_law = distribution, phase_law
         self.frame_name = frame_name
         self.measured: list[np.ndarray] = []
         self.commanded: list[np.ndarray] = []
         self.frames = 0
         # The newest state update() has handed over, or None once it is drawn.
         self.pending: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
-        self.viewer = meshcat.Visualizer()
-        print(f"meshcat: {self.viewer.url()}")
-        rng = np.random.default_rng(0)
-        points = _sample_marginal(distribution, POSITION_DIMS, PDF_POINTS, rng)
-        log_density = np.log10(distribution.marginal_pdf(points, POSITION_DIMS))
-        draw_pdf_cloud(
-            self.viewer, _cube_to_physical(distribution, points, POSITION_DIMS), log_density
-        )
+        self.viewer = open_viewer()
+        # A phase law's target moves with phi and the stall, so its cloud is drawn by
+        # the drawing thread as the run goes; otherwise the GMM is fixed and drawn once.
+        if phase_law is None:
+            rng = np.random.default_rng(0)
+            points = _sample_marginal(distribution, POSITION_DIMS, PDF_POINTS, rng)
+            log_density = np.log10(distribution.marginal_pdf(points, POSITION_DIMS))
+            draw_pdf_cloud(
+                self.viewer, _cube_to_physical(distribution, points, POSITION_DIMS), log_density
+            )
         self.robot_view = show_robot(self.viewer, self.pin_model.robot, np.zeros(6), frame_name)
         draw_axes(self.viewer["target"], length=0.08, radius=0.002)
+        if master_ends is not None:
+            draw_start_goal(self.viewer, *master_ends)
         threading.Thread(target=self._draw_pending, daemon=True).start()
 
     def update(
@@ -429,6 +476,20 @@ class LiveView:
                 self.measured.append(p)
                 self.commanded.append(p_target)
                 draw_tcp_paths(self.viewer, np.array(self.measured), np.array(self.commanded))
+                self._draw_phase_target()
+
+    def _draw_phase_target(self) -> None:
+        """The phase law's current target density, rebuilt from its newest weights."""
+        law = self.phase_law
+        if law is None or law.target_weights is None:
+            return
+        p, density = _phase_density_cloud(
+            self.distribution,
+            law.task.X[:, POSITION_DIMS],
+            law.target_weights,
+            law.cores[0].shape[1],
+        )
+        draw_pdf_cloud(self.viewer, p, np.log10(density))
 
 
 class TeachingView:
@@ -452,8 +513,7 @@ class TeachingView:
         self.n_components = n_components
         self.pending_q: np.ndarray | None = None
         self.pending_points: np.ndarray | None = None
-        self.viewer = meshcat.Visualizer()
-        print(f"meshcat: {self.viewer.url()}")
+        self.viewer = open_viewer()
         self.robot_view = show_robot(self.viewer, self.pin_model.robot, np.zeros(6), frame_name)
         threading.Thread(target=self._draw_pending, daemon=True).start()
 
@@ -517,8 +577,7 @@ class Visualizer:
         p, rotation = self.pin_model.forward_kinematics(q, self.frame_name)
         print(f"q = {np.round(q, 4)} rad")
         print(f"{self.frame_name} at {np.round(p, 4)} m, z axis {np.round(rotation[:, 2], 3)}")
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         show_robot(viewer, self.pin_model.robot, q, self.frame_name)
         if sweep_amplitude is not None:
             draw_joint_sweeps(viewer, self.pin_model.robot, q, sweep_amplitude, self.frame_name)
@@ -585,8 +644,7 @@ class Visualizer:
             f"max {orientation_error.max():.5f} rad"
         )
 
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         draw_tcp_paths(viewer, p, p_target)
         animate_robot(viewer, self.pin_model.robot, t, q, self.frame_name)
 
@@ -659,8 +717,7 @@ class Visualizer:
         colors = colormaps["turbo"](np.linspace(0.05, 0.95, n_components))[:, :3]
         _print_gmm_components(distribution, colors)
 
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         show_robot(viewer, self.pin_model.robot, q[0], self.frame_name)
         draw_datapoints(viewer, _cube_to_physical(distribution, X[:, POSITION_DIMS], POSITION_DIMS))
         draw_ellipsoids(
@@ -687,6 +744,49 @@ class Visualizer:
             f"orientation group at {np.round(centre + ORIENTATION_GROUP_OFFSET, 3)} m, "
             f"1 rad drawn as {scale / 2:.3f} m"
         )
+        return viewer
+
+    def show_phase_distribution(self, master_path: Path, labelled_path: Path) -> meshcat.Visualizer:
+        """The phase target at each phase, with a phi slider, in MeshCat.
+
+        labelled_path is a file from label_datapoint_phases.py. At each phi the
+        datapoints are weighted by the phase kernel with no stall (sigma_b =
+        sigma_f), and two clouds show the result, toggled in the MeshCat tree:
+        - phase/datapoints: the datapoints that carry weight, coloured by it;
+        - phase/density: the position marginal of the density the ergodic law
+          would track, the K-mode Fourier series of those weighted datapoints in
+          the pipeline's cube, on a grid, cells below a share of its peak left out.
+        The arm stands at the master's pose of that phase. All datapoints are
+        drawn small and black, the master's TCP path in red.
+        """
+        with np.load(labelled_path) as data:
+            q, phi_labels = data["q"], data["phi"]
+        context = phase_context(master_path, q, self.pin_model)
+        distribution, X = self._fit_distribution(np.arange(len(q), dtype=float), q, n_components=8)
+        print(
+            f"sigma_f = {context.sigma_f:.4f}, lead = {LEAD_SCALE * context.sigma_f:.4f}, h = {context.h:.3f}, dl/dphi = {context.dl_dphi:.1f}"
+        )
+        frames = []
+        for phi in np.linspace(0.0, 1.0, PHASE_FRAMES):
+            w = phase_weights(phi_labels, phi, context.sigma_f, context.sigma_f)
+            active = w > PHASE_WEIGHT_FLOOR * w.max()
+            layers = {
+                "datapoints": (context.p[active], w[active], 0.005),
+                "density": (
+                    *_phase_density_cloud(distribution, X[:, POSITION_DIMS], w, PHASE_K),
+                    0.004,
+                ),
+            }
+            q_master = context.q_master[np.argmin(np.abs(context.phi_master - phi))]
+            frames.append((phi, q_master, layers))
+
+        viewer = open_viewer()
+        draw_datapoints(viewer, context.p)
+        draw_start_goal(viewer, context.p_master[0], context.p_master[-1])
+        animate_phase_distribution(
+            viewer, self.pin_model.robot, frames, context.p_master, self.frame_name
+        )
+        print("phi slider: Animations > default > time, in the MeshCat controls")
         return viewer
 
     def show_ergodic_trajectory(
@@ -750,8 +850,7 @@ class Visualizer:
         rng = np.random.default_rng(0)
         points = _sample_marginal(distribution, POSITION_DIMS, PDF_POINTS, rng)
         log_density = np.log10(distribution.marginal_pdf(points, POSITION_DIMS))
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         points_physical = _cube_to_physical(distribution, points, POSITION_DIMS)
         draw_position_distribution(
             viewer, points_physical, log_density, samples_physical[:, POSITION_DIMS]

@@ -3,11 +3,12 @@
 
 The loop is agx_reference/piper/main_gc.py; the only addition is a 10 Hz tap on
 the q it already reads every cycle. Ctrl-C hands the arm to a position hold,
-then writes workspace/output/joint_angles_<timestamp>.npz.
+then writes joint_angles_<timestamp>.npz to --out, workspace/output by default.
 
-Run from workspace/src:  python record_joint_angles.py
+Run from workspace/src:  python record_joint_angles.py [--out DIR]
 """
 
+import argparse
 import time
 from datetime import datetime
 from pathlib import Path
@@ -33,7 +34,7 @@ REC_FREQ_HZ = 100.0
 CONTROL_FREQ_HZ = 100.0
 
 
-def main() -> None:
+def main(out_dir: Path) -> None:
     pin = AgxPinocchio(str(URDF_PATH))
     robot = connect_arm()
     joint_angles = np.array(robot.get_joint_angles().msg)
@@ -68,11 +69,15 @@ def main() -> None:
     finally:
         # Hold before any file I/O, so a failed write cannot leave the arm unheld.
         hold_current_pose(robot, joint_angles)
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        path = OUTPUT_DIR / f"joint_angles_{datetime.now():%Y%m%d_%H%M%S}.npz"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"joint_angles_{datetime.now():%Y%m%d_%H%M%S}.npz"
         recorder.save(path)
         print(f"saved {len(recorder)} samples to {path}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--out", type=Path, default=OUTPUT_DIR, help="directory to save in, created if missing"
+    )
+    main(parser.parse_args().out)

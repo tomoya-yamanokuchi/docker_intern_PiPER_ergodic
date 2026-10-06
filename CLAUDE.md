@@ -12,7 +12,7 @@ tree holding only `agx_reference/`).
    physically connected. The scripts that open a session with it are
    `agx_reference/piper/main_*.py`, `record_joint_angles.py`,
    `teach_datapoints.py`, `play_joint_angles.py`, `identify_friction.py`,
-   `run_ergodic_pipeline.py` and `run_ergodic_trials.py`
+   `run_ergodic_pipeline.py`, `run_ergodic_trials.py` and `run_ergodic_phase.py`
    — and, generally, anything that imports `pyAgxArm` or
    `execution.executor_helpers`, or calls `robot.connect()`, `robot.enable()`,
    `move_mit`, `move_p` or `move_j`. The user runs those; Claude writes the code
@@ -292,7 +292,8 @@ workspace/src/
 ├── identify_friction.py                    # TOUCHES THE ARM: friction from sweeps
 ├── make_sweep_recording.py                 # hardware-free: a synthetic recording to replay
 ├── run_ergodic_pipeline.py                 # TOUCHES THE ARM: the online peg-in-hole run (§3)
-└── run_ergodic_trials.py                   # TOUCHES THE ARM: the N-trial experiment (§3, §5)
+├── run_ergodic_trials.py                   # TOUCHES THE ARM: the N-trial experiment (§3, §5)
+└── run_ergodic_phase.py                    # TOUCHES THE ARM: phase-conditioned law (ergodic_controller/phase_ergodic_controller.py)
 ```
 
 There are no `__init__.py` files; these are namespace packages. Every `test_*.py`

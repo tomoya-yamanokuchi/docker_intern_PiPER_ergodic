@@ -130,9 +130,9 @@ recordings/
 bags/
 *.bag
 
-# Kept demonstrations and the figures made from them: regenerable from the arm
-# and from the code, so out of history like everything else in output/.
-workspace/saved_recordings/
+# Figures made from kept demonstrations: regenerable from the code. The kept
+# demonstrations themselves, workspace/saved_recordings/, are tracked -- a
+# recording cannot be regenerated without retaking it on the arm.
 workspace/plots/
 
 
