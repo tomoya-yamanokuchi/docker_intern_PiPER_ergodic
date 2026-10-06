@@ -1,8 +1,14 @@
 """Offline checks of PhaseErgodicController: python test_phase_ergodic_controller.py."""
 
+from pathlib import Path
+
 import numpy as np
 import tt
+from scipy.spatial.transform import Rotation
 
+from core.agx_pinocchio import AgxPinocchio
+from direct_teaching.distribution.phase_projection import tcp_poses
+from direct_teaching.distribution.pose_distribution import PoseDistribution
 from ergodic_controller.ergodic_controller import (
     ErgodicController,
     _fourier_basis_tt,
@@ -16,6 +22,9 @@ from ergodic_controller.phase_ergodic_controller import (
 )
 
 K = 5
+URDF_PATH = (
+    Path(__file__).resolve().parents[1] / "agx_reference/piper/piper/urdf/piper_description.urdf"
+)
 RNG = np.random.default_rng(0)
 
 
@@ -110,6 +119,39 @@ def test_phase_estimate_is_monotone_windowed_and_hysteretic() -> None:
     assert np.isclose(phase.phi, 0.10)
     phase.step(at(0.60), 0.01)  # beyond the window's 0.12 ahead: only the window's end
     assert np.isclose(phase.phi, 0.22)
+
+
+def test_phase_follows_a_pure_rotation_through_the_cube() -> None:
+    """A master that only turns joint 6, so peg_tcp stays put: only the rotation term can see it.
+
+    The clock reads the orientation back out of the cube state; the expected phase is the
+    master sample the state was made from.
+    """
+    pin_model = AgxPinocchio(str(URDF_PATH))
+    q_start = np.array([0.0, 1.0, -1.0, 0.0, 0.5, 0.0])
+    q_master = np.tile(q_start, (101, 1))
+    q_master[:, 5] = np.linspace(0.0, 1.0, 101)
+    p, quat = tcp_poses(pin_model, q_master)
+    R = Rotation.from_quat(quat, scalar_first=True).as_matrix()
+    distribution = PoseDistribution(np.arange(101.0), p, R, n_components=2)
+    X = np.array([distribution.pose_to_state(p_i, R_i) for p_i, R_i in zip(p, R, strict=True)])
+    phi_master = np.linspace(0.0, 1.0, 101)
+    task = PhaseTask(
+        X=X[::5],
+        phi=phi_master[::5],
+        P_master=X[:, :3],
+        phi_master=phi_master,
+        span=distribution.upper[:3] - distribution.lower[:3],
+        sigma_f=0.04,
+        rotation_length=0.06,
+        Q_master=quat,
+        distribution=distribution,
+    )
+    phase = PhaseErgodicController(task, u_max=1.0, K=K)
+    # Steps of 0.1, inside the window's 0.12 ahead.
+    for i in (10, 20, 30, 40):
+        phase.step(X[i], 0.01)
+        assert np.isclose(phase.phi, phi_master[i]), (i, phase.phi)
 
 
 if __name__ == "__main__":

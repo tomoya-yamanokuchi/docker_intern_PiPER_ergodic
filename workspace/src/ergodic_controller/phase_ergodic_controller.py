@@ -24,8 +24,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import tt
+from scipy.spatial.transform import Rotation
 
-from direct_teaching.distribution.phase_projection import phase_weights
+from direct_teaching.distribution.phase_projection import phase_weights, rotation_angle
+from direct_teaching.distribution.pose_distribution import PoseDistribution
 from ergodic_controller.ergodic_controller import _optimisation_weights, _pull_to_centre
 
 # Phases the estimator may look back and ahead of the current phi, and the
@@ -49,6 +51,11 @@ class PhaseTask:
     sigma_f: float
     # The leading cube axes the law runs on; 2 is the x-y plane, the rest held by the caller.
     axes: int = 6
+    # l of phase_projection's pose distance, m per rad; 0 projects on position alone. The
+    # rotation term needs the master's orientations and the cube to read x's back out.
+    rotation_length: float = 0.0
+    Q_master: np.ndarray | None = None  # (N, 4) scalar-first quaternions
+    distribution: PoseDistribution | None = None
 
 
 def _basis(Z: np.ndarray, K: int) -> tuple[np.ndarray, np.ndarray]:  # (..., 6) -> two (..., 6, K)
@@ -106,11 +113,15 @@ class PhaseErgodicController:
         return self.beta * float(np.exp(-(d**2) / (2 * self.task.sigma_f**2)).sum())
 
     def _advance_phase(self, x: np.ndarray) -> None:
-        """Monotone, windowed nearest-sample projection by position in metres, with sigma_f / 4 hysteresis."""
+        """Monotone, windowed nearest-sample projection by pose distance, with sigma_f / 4 hysteresis."""
         task = self.task
         lo, hi = max(0.0, self.phi - PHASE_WINDOW[0]), min(1.0, self.phi + PHASE_WINDOW[1])
         window = (task.phi_master >= lo) & (task.phi_master <= hi)
         d2 = (((task.P_master[window] - x[: len(task.span)]) * task.span) ** 2).sum(axis=1)
+        if task.rotation_length:
+            _, R_x = task.distribution.state_to_pose(x)
+            quat = Rotation.from_matrix(R_x).as_quat(scalar_first=True)
+            d2 = d2 + (task.rotation_length * rotation_angle(task.Q_master[window], quat)) ** 2
         phi_hat = float(task.phi_master[window][np.argmin(d2)])
         if phi_hat > self.phi + task.sigma_f / 4:
             if int(phi_hat / EVENT_STEP) > int(self.phi / EVENT_STEP):

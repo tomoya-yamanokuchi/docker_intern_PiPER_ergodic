@@ -28,12 +28,13 @@ URDF_PATH = (
 )
 
 
-def main(master_path: Path, datapoints_path: Path) -> None:
+def main(master_path: Path, datapoints_path: Path, rotation_length: float) -> None:
     _, q = load_recording(datapoints_path)
-    context = phase_context(master_path, q, AgxPinocchio(str(URDF_PATH)))
-    phi = project(context.p, context.p_master, context.phi_master)
+    context = phase_context(master_path, q, AgxPinocchio(str(URDF_PATH)), rotation_length)
+    phi = project(context)
 
     print(f"master: {len(context.phi_master)} samples; datapoints: {len(q)}")
+    print(f"pose distance: l = {rotation_length} m/rad")
     print(
         f"k = {context.k}, h = {1000 * context.h:.1f} mm, dl/dphi = {1000 * context.dl_dphi:.0f} mm"
     )
@@ -42,7 +43,7 @@ def main(master_path: Path, datapoints_path: Path) -> None:
     print(f"datapoints per phi decile: {counts.tolist()}")
 
     path = datapoints_path.with_name(f"{datapoints_path.stem}_phase.npz")
-    save_phase_labels(path, q, phi)
+    save_phase_labels(path, q, phi, rotation_length)
     print(f"saved {path}")
 
 
@@ -50,5 +51,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("master", type=Path, help="joint_angles_*.npz, the master trajectory")
     parser.add_argument("datapoints", type=Path, help="datapoints_*.npz to label")
+    parser.add_argument(
+        "--rotation-length",
+        type=float,
+        default=0.0,
+        help="m per rad of rotation in the pose distance; 0 projects on position alone, "
+        "0.06 (the peg length) for run_ergodic_phase_6dof.py",
+    )
     args = parser.parse_args()
-    main(args.master, args.datapoints)
+    main(args.master, args.datapoints, args.rotation_length)

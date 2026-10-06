@@ -137,33 +137,45 @@ def prepare_exploration(recording: Path) -> Exploration:
     )
 
 
-def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -> Exploration:
+def prepare_phase_exploration(
+    master: Path, labelled: Path, beta: float = 1.0, planar: bool = True
+) -> Exploration:
     """prepare_exploration with the phase-conditioned law, before the arm is touched.
 
     labelled is a file from label_datapoint_phases.py. The datapoints' GMM is
     fitted only for its cube, so the gains, MAX_SPEED and the interpolator see the
     same coordinates as in run_ergodic_pipeline.py; the law itself uses the
     datapoints directly.
+
+    planar runs the law on x-y and projects the phase on x-y. Otherwise the law
+    runs on all six axes and the phase is projected on the full pose, with the l
+    the file was labelled with.
     """
     controller = make_controller(dofs=6)
     with np.load(labelled) as data:
         q, phi = data["q"], data["phi"]
+        # Files labelled before the rotation term carry none: they projected on position alone.
+        rotation_length = float(data["rotation_length"]) if "rotation_length" in data else 0.0
     distribution = fit_distribution(controller, np.arange(len(q), dtype=float), q)
-    context = phase_context(master, q, controller.pin_model)
+    context = phase_context(master, q, controller.pin_model, rotation_length)
 
     def to_cube(q_rows: np.ndarray) -> np.ndarray:  # (n, 6) rad -> (n, 6) cube
         poses = (controller.pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q_rows)
         return np.array([distribution.pose_to_state(p_i, R_i) for p_i, R_i in poses])
 
+    projected = 2 if planar else 3
     task = PhaseTask(
         X=to_cube(q),
         phi=phi,
-        P_master=to_cube(context.q_master)[:, :2],
+        P_master=to_cube(context.q_master)[:, :projected],
         phi_master=context.phi_master,
         # The cube scales each axis differently; back to metres, as the labelling projects.
-        span=distribution.upper[:2] - distribution.lower[:2],
+        span=distribution.upper[:projected] - distribution.lower[:projected],
         sigma_f=context.sigma_f,
-        axes=2,
+        axes=2 if planar else 6,
+        rotation_length=0.0 if planar else rotation_length,
+        Q_master=context.quat_master,
+        distribution=distribution,
     )
     print(
         f"phase: {len(q)} datapoints, sigma_f = {context.sigma_f:.4f}, lead = {LEAD_SCALE * context.sigma_f:.4f}, beta = {beta:g}"
@@ -181,7 +193,7 @@ def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -
             phase_law=law,
             master_ends=context.p_master[[0, -1]],
         ),
-        planar=True,
+        planar=planar,
     )
 
 

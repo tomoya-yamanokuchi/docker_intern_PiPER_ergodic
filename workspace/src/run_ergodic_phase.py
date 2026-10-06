@@ -50,8 +50,8 @@ def save_phase_trace(trace: list[tuple[float, float, float]]) -> None:
     print(f"saved {len(phi)} ergodic steps to {path}")
 
 
-def main(master: Path, labelled: Path) -> None:
-    exploration = prepare_phase_exploration(master, labelled, BETA)
+def main(master: Path, labelled: Path, planar: bool = True) -> None:
+    exploration = prepare_phase_exploration(master, labelled, BETA, planar)
 
     robot = connect_arm()
     joint_angles = np.array(robot.get_joint_angles().msg)
@@ -68,7 +68,7 @@ def main(master: Path, labelled: Path) -> None:
         # Hold before writing, so a failed write cannot leave the arm unheld.
         hold_current_pose(robot, log[-1][1] if log else joint_angles)
         if log:
-            save_run(log, labelled, label="_phase")
+            save_run(log, labelled, label="_phase" if planar else "_phase6")
             save_phase_trace(exploration.ergodic.trace)
     print(f"final phase {exploration.ergodic.phi:.3f} after {exploration.ergodic.step_count} steps")
 

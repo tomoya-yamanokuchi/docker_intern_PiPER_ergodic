@@ -4,10 +4,13 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pinocchio as pin
+from scipy.spatial.transform import Rotation
 
 from core.agx_pinocchio import AgxPinocchio
 from direct_teaching.distribution.phase_projection import (
     LEAD_SCALE,
+    PhaseContext,
     coefficient_density,
     master_phases,
     neighbour_distance,
@@ -15,6 +18,7 @@ from direct_teaching.distribution.phase_projection import (
     phase_weights,
     position_coefficients,
     project,
+    rotation_angle,
     save_phase_labels,
 )
 from direct_teaching.recorder.joint_angle_recorder import load_recording
@@ -36,9 +40,29 @@ def _l_shaped_master() -> tuple[np.ndarray, np.ndarray]:  # (N, 3) m, (N,) phase
     return S, master_phases(t)
 
 
+def _context(p: np.ndarray, p_master: np.ndarray, phi_master: np.ndarray) -> PhaseContext:
+    """Positions only, every orientation the identity."""
+    quat = np.tile([1.0, 0.0, 0.0, 0.0], (len(p), 1))
+    quat_master = np.tile([1.0, 0.0, 0.0, 0.0], (len(p_master), 1))
+    return PhaseContext(
+        p=p,
+        quat=quat,
+        q_master=np.zeros((len(p_master), 6)),
+        p_master=p_master,
+        quat_master=quat_master,
+        phi_master=phi_master,
+        rotation_length=0.06,
+        k=0,
+        h=0.0,
+        dl_dphi=0.0,
+        sigma_f=0.0,
+    )
+
+
 def test_master_samples_project_to_their_own_phase() -> None:
     S_master, phi_master = _l_shaped_master()
-    np.testing.assert_array_equal(project(S_master, S_master, phi_master), phi_master)
+    phi = project(_context(S_master, S_master, phi_master))
+    np.testing.assert_array_equal(phi, phi_master)
 
 
 def test_noisy_points_project_near_their_true_phase() -> None:
@@ -46,8 +70,17 @@ def test_noisy_points_project_near_their_true_phase() -> None:
     rng = np.random.default_rng(1)
     # Well below the sample spacing, about 0.85 mm on both legs.
     S = S_master + 1e-4 * rng.standard_normal(S_master.shape)
-    index = np.searchsorted(phi_master, project(S, S_master, phi_master))
+    index = np.searchsorted(phi_master, project(_context(S, S_master, phi_master)))
     assert np.abs(index - np.arange(len(S_master))).max() <= 2
+
+
+def test_rotation_angle_is_the_geodesic_distance_on_so3() -> None:
+    rotations = Rotation.random(40, random_state=4)
+    R, quat = rotations.as_matrix(), rotations.as_quat(scalar_first=True)
+    expected = [np.linalg.norm(pin.log3(R[i].T @ R[i + 1])) for i in range(39)]
+    np.testing.assert_allclose(rotation_angle(quat[:-1], quat[1:]), expected, atol=1e-7)
+    # q and -q are the same rotation.
+    np.testing.assert_allclose(rotation_angle(quat[:-1], -quat[1:]), expected, atol=1e-7)
 
 
 def test_phase_weights_peak_one_lead_ahead() -> None:
@@ -60,7 +93,8 @@ def test_phase_weights_peak_one_lead_ahead() -> None:
 def test_neighbour_distance_on_a_regular_line() -> None:
     # 16 points 1 apart: k = 4. The 4th-nearest distance is 4, 3 at the two ends and
     # one in, and 2 for the twelve interior points, so the median is 2.
-    k, h = neighbour_distance(np.arange(16.0)[:, None])
+    x = np.arange(16.0)
+    k, h = neighbour_distance(np.abs(x[:, None] - x[None, :]))
     assert k == 4 and h == 2.0
 
 
@@ -102,15 +136,17 @@ def test_datapoints_on_the_master_get_its_phase() -> None:
         master_path = Path(directory) / "joint_angles_master.npz"
         np.savez(master_path, t=t, q=q)
         q_points = q[20:220:9]
-        context = phase_context(master_path, q_points, pin_model)
-        phi = project(context.p, context.p_master, context.phi_master)
+        context = phase_context(master_path, q_points, pin_model, rotation_length=0.06)
+        phi = project(context)
         # The motion starts at q_start itself, so sample 20 is the last still one, which the
         # trim keeps as its first: sample 20 + 9 i becomes master sample 9 i.
         np.testing.assert_allclose(phi, context.phi_master[9 * np.arange(len(q_points))])
         labelled_path = Path(directory) / "datapoints_phase.npz"
-        save_phase_labels(labelled_path, q_points, phi)
+        save_phase_labels(labelled_path, q_points, phi, context.rotation_length)
         _, q_loaded = load_recording(labelled_path)
         np.testing.assert_array_equal(q_loaded, q_points)
+        with np.load(labelled_path) as data:
+            assert float(data["rotation_length"]) == 0.06
     assert context.sigma_f > 0
 
 

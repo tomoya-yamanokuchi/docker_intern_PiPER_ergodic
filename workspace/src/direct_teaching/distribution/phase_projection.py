@@ -5,17 +5,22 @@ recorded with record_joint_angles.py, and its phase is its normalised time
 t / T: a pause while pressing or turning keeps its own share of phi, where a
 phase by arc length would collapse it to almost nothing.
 
-A datapoint's phase is that of the nearest master sample by peg_tcp position
-alone, in plain Euclidean metres. Both normalisations tried before stalled the
-phase on the arm: dividing each axis by the datapoints' spread let the wrist's
-tilt, then the few millimetres of height, outweigh centimetres of progress
-along the path.
+A datapoint's phase is that of the nearest master sample by peg_tcp pose, in
+the product metric of R^3 x SO(3): d^2 = |dp|^2 + (l * theta)^2, theta the
+geodesic rotation angle. SE(3) has no bi-invariant metric, so mixing metres and
+radians needs the one length l; it is how far a point l from the rotation axis
+travels, and l = 0 is position alone, in plain Euclidean metres. Both
+normalisations tried before stalled the phase on the arm: dividing each axis by
+the datapoints' spread let the wrist's tilt, then the few millimetres of height,
+outweigh centimetres of progress along the path. A fixed physical l cannot be
+dominated by a near-constant axis.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from core.agx_pinocchio import AgxPinocchio
 from direct_teaching.recorder.joint_angle_recorder import load_recording
@@ -28,40 +33,66 @@ LEAD_SCALE = 1.0
 
 @dataclass
 class PhaseContext:
-    """The datapoints' and the master's TCP positions, and the parameters derived from them."""
+    """The datapoints' and the master's TCP poses, and the parameters derived from them."""
 
     p: np.ndarray  # (M, 3) m, datapoint TCP positions
+    quat: np.ndarray  # (M, 4) datapoint TCP orientations, scalar first
     q_master: np.ndarray  # (N, 6) rad
     p_master: np.ndarray  # (N, 3) m
+    quat_master: np.ndarray  # (N, 4)
     phi_master: np.ndarray  # (N,)
+    rotation_length: float  # m per rad, l of the pose distance
     k: int
     h: float  # m
     dl_dphi: float  # m per unit phase
     sigma_f: float
 
 
-def tcp_positions(pin_model: AgxPinocchio, q: np.ndarray) -> np.ndarray:  # (N, 6) rad -> (N, 3) m
-    return np.array([pin_model.forward_kinematics(q_i, TCP_FRAME_NAME)[0] for q_i in q])
+def tcp_poses(
+    pin_model: AgxPinocchio, q: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:  # (N, 6) rad -> (N, 3) m, (N, 4) scalar-first quaternions
+    poses = [pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q]
+    p = np.array([p_i for p_i, _ in poses])
+    R = np.array([R_i for _, R_i in poses])
+    return p, Rotation.from_matrix(R).as_quat(scalar_first=True)
+
+
+def rotation_angle(quat_a: np.ndarray, quat_b: np.ndarray) -> np.ndarray:  # (..., 4) -> (...) rad
+    """The geodesic distance on SO(3); |<a, b>| because q and -q are the same rotation."""
+    return 2.0 * np.arccos(np.clip(np.abs((quat_a * quat_b).sum(axis=-1)), 0.0, 1.0))
+
+
+def pose_distance(
+    p_a: np.ndarray,  # (..., 3) m
+    quat_a: np.ndarray,  # (..., 4)
+    p_b: np.ndarray,
+    quat_b: np.ndarray,
+    rotation_length: float,  # m per rad
+) -> np.ndarray:  # (...) m, broadcast
+    rotation = rotation_length * rotation_angle(quat_a, quat_b)
+    return np.sqrt(((p_a - p_b) ** 2).sum(axis=-1) + rotation**2)
 
 
 def master_phases(t: np.ndarray) -> np.ndarray:  # (N,) s -> (N,) in [0, 1]
     return t / t[-1]
 
 
-def project(
-    p: np.ndarray,  # (M, 3) m
-    p_master: np.ndarray,  # (N, 3) m
-    phi_master: np.ndarray,  # (N,)
-) -> np.ndarray:  # (M,)
-    """Phase of the nearest master sample to each position, in metres; the first on ties."""
-    d2 = ((p[:, None, :] - p_master[None, :, :]) ** 2).sum(axis=2)
-    return phi_master[np.argmin(d2, axis=1)]
+def project(context: PhaseContext) -> np.ndarray:  # (M,)
+    """Phase of the nearest master sample to each datapoint, by pose distance; the first on ties."""
+    d = pose_distance(
+        context.p[:, None],
+        context.quat[:, None],
+        context.p_master[None],
+        context.quat_master[None],
+        context.rotation_length,
+    )
+    return context.phi_master[np.argmin(d, axis=1)]
 
 
-def neighbour_distance(X: np.ndarray) -> tuple[int, float]:  # (M, d)
+def neighbour_distance(d: np.ndarray) -> tuple[int, float]:  # (M, M) pairwise distances
     """k = round(sqrt(M)) and h, the median distance to the k-th nearest neighbour."""
-    k = round(np.sqrt(len(X)))
-    d = np.linalg.norm(X[:, None, :] - X[None, :, :], axis=2)
+    k = round(np.sqrt(len(d)))
+    d = d.copy()
     np.fill_diagonal(d, np.inf)
     return k, float(np.median(np.sort(d, axis=1)[:, k - 1]))
 
@@ -105,18 +136,23 @@ def coefficient_density(
 
 
 def phase_context(
-    master_path: Path, q: np.ndarray, pin_model: AgxPinocchio
-) -> PhaseContext:  # q (M, 6) rad, the datapoints
+    master_path: Path, q: np.ndarray, pin_model: AgxPinocchio, rotation_length: float = 0.0
+) -> PhaseContext:  # q (M, 6) rad, the datapoints; rotation_length m per rad
     t_master, q_master = load_recording(master_path)
-    p, p_master = tcp_positions(pin_model, q), tcp_positions(pin_model, q_master)
-    k, h = neighbour_distance(p)
+    (p, quat), (p_master, quat_master) = tcp_poses(pin_model, q), tcp_poses(pin_model, q_master)
+    length = rotation_length
+    k, h = neighbour_distance(pose_distance(p[:, None], quat[:, None], p[None], quat[None], length))
     # phi spans 1, so the master's length is its length per unit phase.
-    dl_dphi = float(np.linalg.norm(np.diff(p_master, axis=0), axis=1).sum())
+    steps = pose_distance(p_master[1:], quat_master[1:], p_master[:-1], quat_master[:-1], length)
+    dl_dphi = float(steps.sum())
     return PhaseContext(
         p=p,
+        quat=quat,
         q_master=q_master,
         p_master=p_master,
+        quat_master=quat_master,
         phi_master=master_phases(t_master),
+        rotation_length=rotation_length,
         k=k,
         h=h,
         dl_dphi=dl_dphi,
@@ -124,6 +160,14 @@ def phase_context(
     )
 
 
-def save_phase_labels(path: Path, q: np.ndarray, phi: np.ndarray) -> None:
-    """q (M, 6) rad and phi (M,). No t, so load_recording still reads it as a datapoint set."""
-    np.savez(path, q=np.asarray(q, dtype=float).reshape(-1, 6), phi=np.asarray(phi, dtype=float))
+def save_phase_labels(path: Path, q: np.ndarray, phi: np.ndarray, rotation_length: float) -> None:
+    """q (M, 6) rad, phi (M,) and the l they were labelled with, so a run projects as they did.
+
+    No t, so load_recording still reads it as a datapoint set.
+    """
+    np.savez(
+        path,
+        q=np.asarray(q, dtype=float).reshape(-1, 6),
+        phi=np.asarray(phi, dtype=float),
+        rotation_length=float(rotation_length),
+    )

@@ -761,7 +761,9 @@ class Visualizer:
         """
         with np.load(labelled_path) as data:
             q, phi_labels = data["q"], data["phi"]
-        context = phase_context(master_path, q, self.pin_model)
+            # Files labelled before the rotation term carry none: they projected on position alone.
+            rotation_length = float(data["rotation_length"]) if "rotation_length" in data else 0.0
+        context = phase_context(master_path, q, self.pin_model, rotation_length)
         distribution, X = self._fit_distribution(np.arange(len(q), dtype=float), q, n_components=8)
         print(
             f"sigma_f = {context.sigma_f:.4f}, lead = {LEAD_SCALE * context.sigma_f:.4f}, h = {context.h:.3f}, dl/dphi = {context.dl_dphi:.1f}"
