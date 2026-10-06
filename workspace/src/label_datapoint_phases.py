@@ -15,7 +15,12 @@ from pathlib import Path
 import numpy as np
 
 from core.agx_pinocchio import AgxPinocchio
-from direct_teaching.distribution.phase_projection import phase_context, project, save_phase_labels
+from direct_teaching.distribution.phase_projection import (
+    LEAD_SCALE,
+    phase_context,
+    project,
+    save_phase_labels,
+)
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 
 URDF_PATH = (
@@ -32,7 +37,7 @@ def main(master_path: Path, datapoints_path: Path) -> None:
     print(
         f"k = {context.k}, h = {1000 * context.h:.1f} mm, dl/dphi = {1000 * context.dl_dphi:.0f} mm"
     )
-    print(f"sigma_f = lead = {context.sigma_f:.4f}")
+    print(f"sigma_f = {context.sigma_f:.4f}, lead = {LEAD_SCALE * context.sigma_f:.4f}")
     counts, _ = np.histogram(phi, bins=10, range=(0.0, 1.0))
     print(f"datapoints per phi decile: {counts.tolist()}")
 

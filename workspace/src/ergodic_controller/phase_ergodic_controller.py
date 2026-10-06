@@ -5,7 +5,8 @@ phi, read off a master trajectory and never a decision variable, conditions
 both halves of the law:
 
 - the target density is the taught datapoints weighted by an asymmetric kernel
-  around phi + lead, sigma_f ahead and sigma_b behind, normalised every step;
+  around phi + lead (LEAD_SCALE * sigma_f), sigma_f ahead and sigma_b behind,
+  normalised every step;
 - the spatial statistic is the arm's own past states weighted by phase
   similarity, normalised to mass 1 as E2T2's time average is.
 

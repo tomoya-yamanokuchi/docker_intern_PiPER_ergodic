@@ -19,6 +19,7 @@ from matplotlib.figure import Figure
 from controller.feed_forward import STRIBECK_VELOCITY
 from core.agx_pinocchio import AgxPinocchio, helper
 from direct_teaching.distribution.phase_projection import (
+    LEAD_SCALE,
     coefficient_density,
     phase_context,
     phase_weights,
@@ -763,7 +764,7 @@ class Visualizer:
         context = phase_context(master_path, q, self.pin_model)
         distribution, X = self._fit_distribution(np.arange(len(q), dtype=float), q, n_components=8)
         print(
-            f"sigma_f = lead = {context.sigma_f:.4f}, h = {context.h:.3f}, dl/dphi = {context.dl_dphi:.1f}"
+            f"sigma_f = {context.sigma_f:.4f}, lead = {LEAD_SCALE * context.sigma_f:.4f}, h = {context.h:.3f}, dl/dphi = {context.dl_dphi:.1f}"
         )
         frames = []
         for phi in np.linspace(0.0, 1.0, PHASE_FRAMES):

@@ -21,6 +21,9 @@ from core.agx_pinocchio import AgxPinocchio
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 
 TCP_FRAME_NAME = "peg_tcp"
+# How far ahead of phi the target kernel is centred, in sigma_f: the forward pull.
+# At 2, datapoints at the current phase keep e^-2 of the peak weight.
+LEAD_SCALE = 2.0
 
 
 @dataclass
@@ -68,10 +71,10 @@ def phase_weights(
 ) -> np.ndarray:  # (M,), sums to 1
     """The target density's weight per datapoint at phase phi.
 
-    A kernel around min(1, phi + lead), lead = sigma_f, of width sigma_f ahead
-    and sigma_b behind.
+    A kernel around min(1, phi + lead), lead = LEAD_SCALE * sigma_f, of width
+    sigma_f ahead and sigma_b behind.
     """
-    d = phi_labels - min(1.0, phi + sigma_f)
+    d = phi_labels - min(1.0, phi + LEAD_SCALE * sigma_f)
     sigma = np.where(d > 0, sigma_f, sigma_b)
     w = np.exp(-(d**2) / (2 * sigma**2))
     return w / w.sum()

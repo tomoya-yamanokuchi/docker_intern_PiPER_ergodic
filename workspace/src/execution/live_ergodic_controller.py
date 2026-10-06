@@ -42,7 +42,7 @@ from scipy.spatial.transform import Rotation as R
 
 from controller.feed_forward import FeedForward
 from controller.task_imp_controller import CartesianImpedanceController, orientation_error
-from direct_teaching.distribution.phase_projection import phase_context
+from direct_teaching.distribution.phase_projection import LEAD_SCALE, phase_context
 from direct_teaching.distribution.pose_distribution import PoseDistribution
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 from ergodic_controller.ergodic_controller import ErgodicController
@@ -165,7 +165,9 @@ def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -
         sigma_f=context.sigma_f,
         axes=2,
     )
-    print(f"phase: {len(q)} datapoints, sigma_f = lead = {context.sigma_f:.4f}, beta = {beta:g}")
+    print(
+        f"phase: {len(q)} datapoints, sigma_f = {context.sigma_f:.4f}, lead = {LEAD_SCALE * context.sigma_f:.4f}, beta = {beta:g}"
+    )
     law = PhaseErgodicController(task, U_MAX, beta, ERGODIC_K)
     return Exploration(
         controller=controller,

@@ -7,6 +7,7 @@ import numpy as np
 
 from core.agx_pinocchio import AgxPinocchio
 from direct_teaching.distribution.phase_projection import (
+    LEAD_SCALE,
     coefficient_density,
     master_phases,
     neighbour_distance,
@@ -53,7 +54,7 @@ def test_phase_weights_peak_one_lead_ahead() -> None:
     _, phi_master = _l_shaped_master()
     w = phase_weights(phi_master, 0.3, 0.05, 0.05)
     assert np.isclose(w.sum(), 1.0)
-    assert np.argmax(w) == np.argmin(np.abs(phi_master - 0.35))
+    assert np.argmax(w) == np.argmin(np.abs(phi_master - (0.3 + LEAD_SCALE * 0.05)))
 
 
 def test_neighbour_distance_on_a_regular_line() -> None:
