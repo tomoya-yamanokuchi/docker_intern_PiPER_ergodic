@@ -41,6 +41,7 @@ from simulation.meshcat_scene import (
     draw_position_distribution,
     draw_start_goal,
     draw_tcp_paths,
+    open_viewer,
     show_robot,
 )
 
@@ -428,8 +429,7 @@ class LiveView:
         self.frames = 0
         # The newest state update() has handed over, or None once it is drawn.
         self.pending: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
-        self.viewer = meshcat.Visualizer()
-        print(f"meshcat: {self.viewer.url()}")
+        self.viewer = open_viewer()
         # A phase law's target moves with phi and the stall, so its cloud is drawn by
         # the drawing thread as the run goes; otherwise the GMM is fixed and drawn once.
         if phase_law is None:
@@ -513,8 +513,7 @@ class TeachingView:
         self.n_components = n_components
         self.pending_q: np.ndarray | None = None
         self.pending_points: np.ndarray | None = None
-        self.viewer = meshcat.Visualizer()
-        print(f"meshcat: {self.viewer.url()}")
+        self.viewer = open_viewer()
         self.robot_view = show_robot(self.viewer, self.pin_model.robot, np.zeros(6), frame_name)
         threading.Thread(target=self._draw_pending, daemon=True).start()
 
@@ -578,8 +577,7 @@ class Visualizer:
         p, rotation = self.pin_model.forward_kinematics(q, self.frame_name)
         print(f"q = {np.round(q, 4)} rad")
         print(f"{self.frame_name} at {np.round(p, 4)} m, z axis {np.round(rotation[:, 2], 3)}")
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         show_robot(viewer, self.pin_model.robot, q, self.frame_name)
         if sweep_amplitude is not None:
             draw_joint_sweeps(viewer, self.pin_model.robot, q, sweep_amplitude, self.frame_name)
@@ -646,8 +644,7 @@ class Visualizer:
             f"max {orientation_error.max():.5f} rad"
         )
 
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         draw_tcp_paths(viewer, p, p_target)
         animate_robot(viewer, self.pin_model.robot, t, q, self.frame_name)
 
@@ -720,8 +717,7 @@ class Visualizer:
         colors = colormaps["turbo"](np.linspace(0.05, 0.95, n_components))[:, :3]
         _print_gmm_components(distribution, colors)
 
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         show_robot(viewer, self.pin_model.robot, q[0], self.frame_name)
         draw_datapoints(viewer, _cube_to_physical(distribution, X[:, POSITION_DIMS], POSITION_DIMS))
         draw_ellipsoids(
@@ -784,8 +780,7 @@ class Visualizer:
             q_master = context.q_master[np.argmin(np.abs(context.phi_master - phi))]
             frames.append((phi, q_master, layers))
 
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         draw_datapoints(viewer, context.p)
         draw_start_goal(viewer, context.p_master[0], context.p_master[-1])
         animate_phase_distribution(
@@ -855,8 +850,7 @@ class Visualizer:
         rng = np.random.default_rng(0)
         points = _sample_marginal(distribution, POSITION_DIMS, PDF_POINTS, rng)
         log_density = np.log10(distribution.marginal_pdf(points, POSITION_DIMS))
-        viewer = meshcat.Visualizer()
-        print(f"meshcat: {viewer.url()}")
+        viewer = open_viewer()
         points_physical = _cube_to_physical(distribution, points, POSITION_DIMS)
         draw_position_distribution(
             viewer, points_physical, log_density, samples_physical[:, POSITION_DIMS]

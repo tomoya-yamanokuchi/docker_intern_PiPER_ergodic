@@ -1,18 +1,66 @@
 """MeshCat drawing in the robot's world frame, served on :7000."""
 
 import math
+import subprocess
+import sys
+import time
 
 import meshcat
 import meshcat.geometry as g
 import meshcat.transformations as tf
 import numpy as np
 import pinocchio as pin
+import zmq
 from matplotlib import colormaps
 from meshcat.animation import Animation
 from pinocchio.visualize import MeshcatVisualizer
 
 PDF_OPACITY = 0.3
 ELLIPSOID_OPACITY = 0.35
+# The one long-lived server every script draws to. Its web port is the first free
+# one from 7000 when it starts, and stays fixed for its lifetime.
+ZMQ_URL = "tcp://127.0.0.1:6000"
+SERVER_START_TIMEOUT = 10.0  # s
+
+
+def _server_answers() -> bool:
+    """Whether a meshcat server replies on ZMQ_URL; a bare REQ to nothing would block forever."""
+    socket = zmq.Context.instance().socket(zmq.REQ)
+    socket.setsockopt(zmq.LINGER, 0)
+    socket.setsockopt(zmq.RCVTIMEO, 500)
+    socket.connect(ZMQ_URL)
+    try:
+        socket.send(b"url")
+        socket.recv()
+        return True
+    except zmq.Again:
+        return False
+    finally:
+        socket.close()
+
+
+def open_viewer() -> meshcat.Visualizer:
+    """A client of the long-lived server, started detached if none answers, its scene cleared.
+
+    meshcat.Visualizer() starts a server that dies with the script, on whichever
+    web port is free then, so every run needed a new tab or a refresh. This server
+    outlives the script, so an open tab simply receives the next run.
+    """
+    if not _server_answers():
+        subprocess.Popen(
+            [sys.executable, "-m", "meshcat.servers.zmqserver", "--zmq-url", ZMQ_URL],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + SERVER_START_TIMEOUT
+        while not _server_answers():
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"no meshcat server answers on {ZMQ_URL}")
+    viewer = meshcat.Visualizer(zmq_url=ZMQ_URL)
+    viewer.delete()  # the previous run's scene
+    print(f"meshcat: {viewer.url()}")
+    return viewer
 
 
 def draw_axes(viewer: meshcat.Visualizer, length: float, radius: float) -> None:  # m
