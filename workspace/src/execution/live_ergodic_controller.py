@@ -68,6 +68,13 @@ U_MAX = 3.0  # cube units per second
 # demonstration's span between them would ask for. It also bounds the first
 # interval, where the arm can start outside the cube with the setpoint far away.
 MAX_SPEED = 0.02  # m/s
+# Joint 6's soft limit in the planar run, where nothing else holds rotation about
+# the peg. A spring-damper on joint 6 alone, inside the last JOINT6_MARGIN before
+# each URDF limit. At the limit the spring gives 1.5 N*m, about 9x joint 6's static
+# friction (0.172 N*m), the most the friction feedforward ever pushes it with.
+JOINT6_MARGIN = 0.3  # rad
+JOINT6_K = 5.0  # N*m/rad
+JOINT6_B = 0.2  # N*m*s/rad, main_jnt_imp.py's joint 6 damping
 
 R_WORLD_BASE = R.from_euler("xyz", [0, 0, 0], degrees=True).as_matrix()
 
@@ -344,6 +351,23 @@ def commanded_pose(
     return p_cmd, free_peg_rotation(R_cmd, R_tcp)
 
 
+def joint6_limit_torque(
+    q6: float,  # rad
+    qd6: float,  # rad/s
+    lower: float,  # rad, joint 6's limits
+    upper: float,  # rad
+) -> float:  # N*m
+    """Zero inside the soft band; beyond it, a spring back to the band's edge plus damping.
+
+    Joint 6's axis is the peg axis, so this torque turns only the rotation the
+    planar run leaves free, and the Cartesian law contributes none about it.
+    """
+    excess = q6 - np.clip(q6, lower + JOINT6_MARGIN, upper - JOINT6_MARGIN)
+    if excess == 0.0:
+        return 0.0
+    return -JOINT6_K * excess - JOINT6_B * qd6
+
+
 def run_control_cycle(
     robot,
     exploration: Exploration,
@@ -371,6 +395,11 @@ def run_control_cycle(
         qd_des=desired_joint_velocity(exploration.controller, q, twist),
         qdd_des=np.zeros(robot.joint_nums),
     )
+    if exploration.planar:
+        model = exploration.controller.pin_model.robot.model
+        cmd_torque[5] += joint6_limit_torque(
+            q[5], joint_velocities[5], model.lowerPositionLimit[5], model.upperPositionLimit[5]
+        )
     apply_joint_torques(robot, cmd_torque)
     return cmd_torque
 
