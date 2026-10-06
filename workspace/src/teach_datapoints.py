@@ -13,13 +13,13 @@ datapoints.
 
 Every change refits the GMM and redraws it in MeshCat with the datapoints on top.
 Ctrl-C hands the arm to a position hold, then writes
-workspace/output/datapoints_<timestamp>.npz.
+datapoints_<timestamp>.npz to --out, workspace/output by default.
 
 An existing datapoints file given as the argument is loaded and extended; it is
 only read, and the session writes a new timestamped file, so an edit cannot
 destroy the set it started from. Withdrawing works from the end of that set.
 
-Run from workspace/src:  python teach_datapoints.py [datapoints_<timestamp>.npz]
+Run from workspace/src:  python teach_datapoints.py [datapoints_<timestamp>.npz] [--out DIR]
 """
 
 import argparse
@@ -132,7 +132,7 @@ def run_control_cycle(
     return joint_angles
 
 
-def main(datapoints: Path | None) -> None:
+def main(datapoints: Path | None, out_dir: Path) -> None:
     pin = AgxPinocchio(str(URDF_PATH))
     view = TeachingView(URDF_PATH, TCP_FRAME_NAME, N_COMPONENTS)
     points = load_starting_points(pin, view, datapoints)
@@ -159,8 +159,8 @@ def main(datapoints: Path | None) -> None:
     finally:
         # Hold before any file I/O, so a failed write cannot leave the arm unheld.
         hold_current_pose(robot, joint_angles)
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        path = OUTPUT_DIR / f"datapoints_{datetime.now():%Y%m%d_%H%M%S}.npz"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"datapoints_{datetime.now():%Y%m%d_%H%M%S}.npz"
         save_datapoints(path, points)
         print(f"saved {len(points)} datapoints to {path}")
 
@@ -173,4 +173,8 @@ if __name__ == "__main__":
         type=Path,
         help="datapoints_*.npz to extend; omit to start a new set. Only ever read.",
     )
-    main(parser.parse_args().datapoints)
+    parser.add_argument(
+        "--out", type=Path, default=OUTPUT_DIR, help="directory to save in, created if missing"
+    )
+    args = parser.parse_args()
+    main(args.datapoints, args.out)
