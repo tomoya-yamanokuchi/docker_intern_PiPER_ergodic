@@ -10,7 +10,8 @@ both halves of the law:
   similarity, normalised to mass 1 as E2T2's time average is.
 
 A stall freezes phi; sigma_b then widens with stall / T(phi), so earlier-phase
-targets return. Hardware-free: everything is in the pipeline's [0, 1]^6 cube.
+targets return. Hardware-free: everything is in the pipeline's [0, 1]^6 cube, or
+in its leading PhaseTask.axes axes -- the x-y plane for the planar run.
 
 Both halves are weighted sums of rank-1 Phi(z_p), so the law is evaluated
 exactly as a sum over points, b_i = sum_p a_p <Lambda, Phi(z_p) * grad_i Phi(x)>,
@@ -41,10 +42,12 @@ class PhaseTask:
 
     X: np.ndarray  # (M, 6) datapoint cube states
     phi: np.ndarray  # (M,) their phase labels
-    P_master: np.ndarray  # (N, 3) master cube positions
+    P_master: np.ndarray  # (N, len(span)) master cube positions
     phi_master: np.ndarray  # (N,) master phases, t / T
-    span: np.ndarray  # (3,) m per cube unit on the position axes, so the projection is in metres
+    span: np.ndarray  # m per cube unit on the projected axes, so the projection is in metres
     sigma_f: float
+    # The leading cube axes the law runs on; 2 is the x-y plane, the rest held by the caller.
+    axes: int = 6
 
 
 def _basis(Z: np.ndarray, K: int) -> tuple[np.ndarray, np.ndarray]:  # (..., 6) -> two (..., 6, K)
@@ -85,7 +88,7 @@ class PhaseErgodicController:
     def __init__(self, task: PhaseTask, u_max: float, beta: float = 1.0, K: int = 10):
         self.task, self.u_max, self.beta = task, u_max, beta
         # Rounded as ErgodicController rounds it.
-        self.tt_lambda = _optimisation_weights(task.X.shape[1], K).round(1e-2)
+        self.tt_lambda = _optimisation_weights(task.axes, K).round(1e-2)
         self.cores = tt.vector.to_list(self.tt_lambda)
         self.phi, self.stall, self.last_progress = 0.0, 0, 0.0
         self.memory_x: list[np.ndarray] = []
@@ -106,7 +109,7 @@ class PhaseErgodicController:
         task = self.task
         lo, hi = max(0.0, self.phi - PHASE_WINDOW[0]), min(1.0, self.phi + PHASE_WINDOW[1])
         window = (task.phi_master >= lo) & (task.phi_master <= hi)
-        d2 = (((task.P_master[window] - x[:3]) * task.span) ** 2).sum(axis=1)
+        d2 = (((task.P_master[window] - x[: len(task.span)]) * task.span) ** 2).sum(axis=1)
         phi_hat = float(task.phi_master[window][np.argmin(d2)])
         if phi_hat > self.phi + task.sigma_f / 4:
             if int(phi_hat / EVENT_STEP) > int(self.phi / EVENT_STEP):
@@ -117,7 +120,7 @@ class PhaseErgodicController:
         else:
             self.stall += 1
 
-    def point_weights(self) -> tuple[np.ndarray, np.ndarray, float]:  # (P, 6), (P,), sigma_b
+    def point_weights(self) -> tuple[np.ndarray, np.ndarray, float]:  # (P, axes), (P,), sigma_b
         """[datapoints; memory] and a = [-w; v]: the target negated, the statistic of mass 1."""
         task = self.task
         T = self.dwell(self.phi)
@@ -125,13 +128,13 @@ class PhaseErgodicController:
         w = phase_weights(task.phi, self.phi, task.sigma_f, sigma_b)
         self.target_weights = w
         v = np.exp(-((np.array(self.memory_phi) - self.phi) ** 2) / (2 * task.sigma_f**2))
-        Z = np.vstack([task.X, np.array(self.memory_x)])
+        Z = np.vstack([task.X[:, : task.axes], np.array(self.memory_x)])
         a = np.concatenate([-w, v / v.sum()])
         keep = np.abs(a) > WEIGHT_FLOOR * np.abs(a).max()
         return Z[keep], a[keep], sigma_b
 
     def step(self, x_measured: np.ndarray, dt: float) -> np.ndarray:
-        """Update the phase from the measured state (6,), accumulate it, return x + u dt (6,)."""
+        """Update the phase from the measured state (axes,), accumulate it, return x + u dt (axes,)."""
         x = np.asarray(x_measured, dtype=float)
         self.step_count += 1
         self._advance_phase(x)

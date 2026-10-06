@@ -86,6 +86,9 @@ class Exploration:
     distribution: PoseDistribution
     ergodic: ErgodicController | PhaseErgodicController
     live: LiveView
+    # The law runs on x-y only; z and the peg's tilt stay at the start pose, and
+    # rotation about the peg axis is left free.
+    planar: bool = False
 
 
 def make_controller(dofs: int) -> CartesianImpedanceController:
@@ -148,11 +151,12 @@ def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -
     task = PhaseTask(
         X=to_cube(q),
         phi=phi,
-        P_master=to_cube(context.q_master)[:, :3],
+        P_master=to_cube(context.q_master)[:, :2],
         phi_master=context.phi_master,
         # The cube scales each axis differently; back to metres, as the labelling projects.
-        span=distribution.upper[:3] - distribution.lower[:3],
+        span=distribution.upper[:2] - distribution.lower[:2],
         sigma_f=context.sigma_f,
+        axes=2,
     )
     print(f"phase: {len(q)} datapoints, sigma_f = lead = {context.sigma_f:.4f}, beta = {beta:g}")
     law = PhaseErgodicController(task, U_MAX, beta, ERGODIC_K)
@@ -162,6 +166,7 @@ def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -
         distribution=distribution,
         ergodic=law,
         live=LiveView(distribution, URDF_PATH, TCP_FRAME_NAME, phase_law=law),
+        planar=True,
     )
 
 
@@ -169,6 +174,7 @@ def next_setpoint(
     exploration: Exploration,
     q: np.ndarray,  # (6,) rad, measured on this cycle
     dt: float,  # s, the ergodic step period -- not the control period
+    x_cmd: np.ndarray,  # (6,) cube units, where the interpolator stands now
 ) -> np.ndarray:  # (6,) cube units
     """One ergodic step from wherever the arm is right now, as a cube state.
 
@@ -177,11 +183,17 @@ def next_setpoint(
     accumulates are the arm's own coverage, and U_MAX * dt is exactly the distance
     to the next setpoint. It stays in the cube rather than becoming a pose here,
     because the interpolator between setpoints works in the cube too.
+
+    A planar law steps x-y alone, and the rest is x_cmd's: the start pose's z and
+    orientation, carried unchanged through every setpoint.
     """
     x = exploration.distribution.pose_to_state(
         *exploration.controller.pin_model.forward_kinematics(q, TCP_FRAME_NAME)
     )
-    return exploration.ergodic.step(np.clip(x, 0.0, 1.0), dt)
+    x = np.clip(x, 0.0, 1.0)
+    if not exploration.planar:
+        return exploration.ergodic.step(x, dt)
+    return np.concatenate([exploration.ergodic.step(x[:2], dt), x_cmd[2:]])
 
 
 def first_setpoints(
@@ -196,7 +208,7 @@ def first_setpoints(
     """
     p_tcp, R_tcp = exploration.controller.pin_model.forward_kinematics(q, TCP_FRAME_NAME)
     x_start = exploration.distribution.pose_to_state(p_tcp, R_tcp)
-    return x_start, next_setpoint(exploration, q, 1.0 / ERGODIC_FREQ_HZ)
+    return x_start, next_setpoint(exploration, q, 1.0 / ERGODIC_FREQ_HZ, x_start)
 
 
 def plan_interval(
@@ -304,6 +316,34 @@ def desired_joint_velocity(
     return np.linalg.pinv(controller.pin_model.jacobian(q, TCP_FRAME_NAME)) @ twist
 
 
+def free_peg_rotation(
+    R_cmd: np.ndarray,  # (3, 3), the commanded orientation
+    R_tcp: np.ndarray,  # (3, 3), measured this cycle
+) -> np.ndarray:  # (3, 3)
+    """The measured orientation, tilted the shortest way onto R_cmd's peg axis.
+
+    The peg axis is peg_tcp's z. The orientation error this leaves is perpendicular
+    to the peg, so the impedance law holds the tilt and neither holds nor drives
+    rotation about the peg. A fixed R_cmd with k_rz = 0 does not: the error is in
+    world-aligned axes, so a rotation offset about the peg would leak into the tilt.
+    """
+    align, _ = R.align_vectors([R_cmd[:, 2]], [R_tcp[:, 2]])
+    return align.as_matrix() @ R_tcp
+
+
+def commanded_pose(
+    exploration: Exploration,
+    x_cmd: np.ndarray,  # (6,) cube units, where the interpolator stands
+    q: np.ndarray,  # (6,) rad, measured this cycle
+) -> tuple[np.ndarray, np.ndarray]:  # (3,) m, (3, 3)
+    """The pose x_cmd stands for; a planar run leaves rotation about the peg free."""
+    p_cmd, R_cmd = exploration.distribution.state_to_pose(x_cmd)
+    if not exploration.planar:
+        return p_cmd, R_cmd
+    _, R_tcp = exploration.controller.pin_model.forward_kinematics(q, TCP_FRAME_NAME)
+    return p_cmd, free_peg_rotation(R_cmd, R_tcp)
+
+
 def run_control_cycle(
     robot,
     exploration: Exploration,
@@ -381,12 +421,12 @@ def explore(
         joint_angles = np.array(robot.get_joint_angles().msg)
         # Not at cycle 0: the caller has already taken that step.
         if cycle and cycle % cycles_per_step == 0:
-            x_next = next_setpoint(exploration, joint_angles, ergodic_period)
+            x_next = next_setpoint(exploration, joint_angles, ergodic_period, x_cmd)
             step, twist = plan_interval(
                 distribution, x_cmd, x_next, ergodic_period, cycles_per_step
             )
         x_cmd = x_cmd + step
-        target = distribution.state_to_pose(x_cmd)
+        target = commanded_pose(exploration, x_cmd, joint_angles)
         cmd_torque = run_control_cycle(robot, exploration, joint_angles, target, twist)
         log.append((start_time - t0, joint_angles, target[0], target[1], cmd_torque))
         # Only on a step: step_count holds still between them, so a progress line

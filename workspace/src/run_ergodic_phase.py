@@ -2,13 +2,18 @@
 """Phase-augmented ergodic exploration on the live arm.
 
 run_ergodic_pipeline.py with the ergodic law swapped for the phase-conditioned
-one of ergodic_controller/phase_ergodic_controller.py, the 6-D counterpart of
+one of ergodic_controller/phase_ergodic_controller.py, as in
 Ergodic_Exploration_phase_key_in_lock_2D.ipynb. A phase read off the master
 conditions the target density and the spatial statistic; a stall widens the
 backward kernel so earlier-phase targets return. The loop, gains and rates are
 execution/live_ergodic_controller.py's, unchanged.
 
-The phase starts at 0, so place the arm near the master's start pose first.
+The task is planar: the law explores world x-y only. z and the peg's tilt are
+held at the start pose, and rotation about the peg axis is left free, neither
+held nor driven. The pose is still recorded and logged in all six DoF.
+
+The phase starts at 0, so place the arm near the master's start pose first, at
+the working height and with the peg at the tilt the run should hold.
 Ctrl-C hands the arm to a position hold, then writes the run and a phase trace.
 
 Run from workspace/src:  python run_ergodic_phase.py master.npz datapoints_phase.npz
