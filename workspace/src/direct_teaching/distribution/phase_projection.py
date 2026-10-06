@@ -22,8 +22,8 @@ from direct_teaching.recorder.joint_angle_recorder import load_recording
 
 TCP_FRAME_NAME = "peg_tcp"
 # How far ahead of phi the target kernel is centred, in sigma_f: the forward pull.
-# At 2, datapoints at the current phase keep e^-2 of the peak weight.
-LEAD_SCALE = 2.0
+# At 1, datapoints at the current phase keep e^-1/2 of the peak weight.
+LEAD_SCALE = 1.0
 
 
 @dataclass
