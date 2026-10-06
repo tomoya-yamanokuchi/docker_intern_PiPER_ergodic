@@ -39,6 +39,7 @@ from simulation.meshcat_scene import (
     draw_joint_sweeps,
     draw_pdf_cloud,
     draw_position_distribution,
+    draw_start_goal,
     draw_tcp_paths,
     show_robot,
 )
@@ -417,6 +418,7 @@ class LiveView:
         urdf_path: Path = URDF_PATH,
         frame_name: str = "peg_tcp",
         phase_law: PhaseErgodicController | None = None,
+        master_ends: np.ndarray | None = None,  # (2, 3) m, the master's start and goal
     ):
         self.pin_model = AgxPinocchio(str(urdf_path))
         self.distribution, self.phase_law = distribution, phase_law
@@ -439,6 +441,8 @@ class LiveView:
             )
         self.robot_view = show_robot(self.viewer, self.pin_model.robot, np.zeros(6), frame_name)
         draw_axes(self.viewer["target"], length=0.08, radius=0.002)
+        if master_ends is not None:
+            draw_start_goal(self.viewer, *master_ends)
         threading.Thread(target=self._draw_pending, daemon=True).start()
 
     def update(
@@ -783,6 +787,7 @@ class Visualizer:
         viewer = meshcat.Visualizer()
         print(f"meshcat: {viewer.url()}")
         draw_datapoints(viewer, context.p)
+        draw_start_goal(viewer, context.p_master[0], context.p_master[-1])
         animate_phase_distribution(
             viewer, self.pin_model.robot, frames, context.p_master, self.frame_name
         )

@@ -174,7 +174,13 @@ def prepare_phase_exploration(master: Path, labelled: Path, beta: float = 1.0) -
         feed_forward=FeedForward(urdf_path=str(URDF_PATH), dofs=6),
         distribution=distribution,
         ergodic=law,
-        live=LiveView(distribution, URDF_PATH, TCP_FRAME_NAME, phase_law=law),
+        live=LiveView(
+            distribution,
+            URDF_PATH,
+            TCP_FRAME_NAME,
+            phase_law=law,
+            master_ends=context.p_master[[0, -1]],
+        ),
         planar=True,
     )
 

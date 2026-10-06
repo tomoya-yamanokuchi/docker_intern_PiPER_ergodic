@@ -96,6 +96,17 @@ def draw_ellipsoids(
         node.set_transform(transform)
 
 
+def draw_start_goal(
+    viewer: meshcat.Visualizer,
+    p_start: np.ndarray,  # (3,) m
+    p_goal: np.ndarray,  # (3,) m
+) -> None:
+    """The master's first and last TCP positions: start in green, goal in orange."""
+    for name, p, color in (("master/start", p_start, 0x00C000), ("master/goal", p_goal, 0xFF8000)):
+        viewer[name].set_object(g.Sphere(0.008), g.MeshLambertMaterial(color=color))
+        viewer[name].set_transform(tf.translation_matrix(p))
+
+
 def draw_tcp_paths(
     viewer: meshcat.Visualizer,
     p_measured: np.ndarray,  # (N, 3) m
