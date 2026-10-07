@@ -6,8 +6,13 @@ One PhaseErgodicController lives for the whole sequence. A trial boundary resets
 its phase clock -- phi, the stall counter and the progress mark -- because the arm
 starts the task over, but never its memory of past states. The spatial statistic
 at phase phi weighs every past state by how close its phase is to phi, so in trial
-k it already holds what trials 1 .. k-1 covered at that phase. A dead end explored
+k it already holds what trials 1 .. k-1 tried at that phase. A dead end explored
 at phase 0.3 in trial 1 counts as covered when trial 2 reaches phase 0.3.
+
+Only what a trial tried while stuck is carried into the next one: the states it
+recorded once a stall had outlasted T(phi). Carrying every state made later trials
+slower in the first sequences on the arm, because the route that worked counted as
+covered too and the law steered off it -- in peg_in_hole, off the hole's axis.
 
 The goal is the master's last peg_tcp position: a trial ends when the peg tip comes
 within GOAL_RADIUS of it -- in x-y for the planar task, whose z is held at the start
@@ -49,12 +54,27 @@ from visualization.visualizer import cumulative_average
 # The two_gaps_obstructed runs that reached the end stopped about 8.5 mm from the
 # master's last position, so this is about the closest the law gets unprompted.
 GOAL_RADIUS = 0.01  # m
+# A state is one the trial tried while stuck once stall / T(phi) has reached this: the
+# stall has then lasted as long as the datapoints' share of that phase.
+STUCK_STALL = 1.0
 
 
 def start_trial(exploration: Exploration) -> None:
     """The phase clock back to the task's start; memory_x and memory_phi are kept."""
     law = exploration.ergodic
     law.phi, law.stall, law.last_progress = 0.0, 0, 0.0
+
+
+def forget_progress(exploration: Exploration, n_before: int) -> None:
+    """Drop this trial's states recorded while it was not stuck; n_before older ones stay.
+
+    The law appends one trace row per state, so the trace's tail is this trial's.
+    """
+    law = exploration.ergodic
+    n_trial = len(law.memory_x) - n_before
+    stuck = [stall_over_T >= STUCK_STALL for _, _, stall_over_T in law.trace[-n_trial:]]
+    for memory in (law.memory_x, law.memory_phi):
+        memory[n_before:] = [m for m, keep in zip(memory[n_before:], stuck, strict=True) if keep]
 
 
 def reached_goal(exploration: Exploration, q: np.ndarray, goal: np.ndarray) -> bool:
@@ -73,6 +93,7 @@ def run_one_trial(
     trial: int,
 ) -> float:  # s, from the first torque to the goal
     start_trial(exploration)
+    n_before = len(exploration.ergodic.memory_x)
     setpoints = first_setpoints(exploration, q)
     print_start(exploration, q, setpoints)
     print(
@@ -84,6 +105,7 @@ def run_one_trial(
             robot, exploration, setpoints, log, stop=lambda q: reached_goal(exploration, q, goal)
         )
     finally:
+        forget_progress(exploration, n_before)
         if log:
             save_run(log, labelled, label=f"_phase_trial{trial}")
 
