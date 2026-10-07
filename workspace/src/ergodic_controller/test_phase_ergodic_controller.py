@@ -80,7 +80,7 @@ def test_statistic_has_unit_mass_and_target_minus_one() -> None:
     phase = PhaseErgodicController(_frozen_task(RNG.uniform(0.3, 0.7, (9, 6))), u_max=1.0, K=K)
     for _ in range(6):
         phase.step(RNG.uniform(0.2, 0.8, 6), 0.01)
-    _, a, _ = phase.point_weights()
+    a, _ = phase.point_weights()
     assert np.isclose(a[a > 0].sum(), 1.0) and np.isclose(a[a < 0].sum(), -1.0)
 
 
