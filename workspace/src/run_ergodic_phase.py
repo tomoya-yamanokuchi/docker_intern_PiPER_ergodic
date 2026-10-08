@@ -38,6 +38,9 @@ from execution.live_ergodic_controller import (
 
 # The only tuning knob of the method: scales T(phi), the stall time sigma_b grows over.
 BETA = 1.0
+# The target tracks the master while the phase progresses and gives way to the
+# datapoints over a stall. False keeps it on the datapoints throughout.
+TRACK_MASTER = True
 
 
 def save_phase_trace(trace: list[tuple[float, float, float]]) -> None:
@@ -51,7 +54,7 @@ def save_phase_trace(trace: list[tuple[float, float, float]]) -> None:
 
 
 def main(master: Path, labelled: Path, planar: bool = True) -> None:
-    exploration = prepare_phase_exploration(master, labelled, BETA, planar)
+    exploration = prepare_phase_exploration(master, labelled, BETA, planar, TRACK_MASTER)
 
     robot = connect_arm()
     joint_angles = np.array(robot.get_joint_angles().msg)

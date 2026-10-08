@@ -3,7 +3,7 @@
 
 Does the phase law get faster over trials because it remembers what it has tried?
 One PhaseErgodicController lives for the whole sequence. A trial boundary resets
-its phase clock -- phi, the stall counter and the progress mark -- because the arm
+its phase clock -- phi, the stall counter, the progress mark and the lag -- because the arm
 starts the task over, but never its memory of past states. The spatial statistic
 at phase phi weighs every past state by how close its phase is to phi, so in trial
 k it already holds what trials 1 .. k-1 tried at that phase. A dead end explored
@@ -47,7 +47,7 @@ from execution.live_ergodic_controller import (
     print_start,
     save_run,
 )
-from run_ergodic_phase import BETA, save_phase_trace
+from run_ergodic_phase import BETA, TRACK_MASTER, save_phase_trace
 from run_ergodic_trials import backdrive_to_start, report_trials
 from visualization.visualizer import cumulative_average
 
@@ -62,7 +62,7 @@ STUCK_STALL = 1.0
 def start_trial(exploration: Exploration) -> None:
     """The phase clock back to the task's start; memory_x and memory_phi are kept."""
     law = exploration.ergodic
-    law.phi, law.stall, law.last_progress = 0.0, 0, 0.0
+    law.phi, law.stall, law.last_progress, law.lag = 0.0, 0, 0.0, 0.0
 
 
 def forget_progress(exploration: Exploration, n_before: int) -> None:
@@ -158,7 +158,7 @@ def run_trials(
 
 
 def main(master: Path, labelled: Path, n_trials: int, planar: bool) -> None:
-    exploration = prepare_phase_exploration(master, labelled, BETA, planar)
+    exploration = prepare_phase_exploration(master, labelled, BETA, planar, TRACK_MASTER)
     robot = connect_arm()
     run_trials(robot, exploration, master, labelled, n_trials)
 

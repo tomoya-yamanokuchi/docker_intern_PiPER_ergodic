@@ -1,9 +1,12 @@
 """Phase labels for taught datapoints, by projection onto a master trajectory.
 
 Hardware-free. The master is one continuous demonstration of the whole task,
-recorded with record_joint_angles.py, and its phase is its normalised time
-t / T: a pause while pressing or turning keeps its own share of phi, where a
-phase by arc length would collapse it to almost nothing.
+recorded with record_joint_angles.py, and its phase is its normalised arc
+length in the pose metric below. Equal phase is then equal travel, which is what
+sigma_f = h / length and the stall clock's commanded speed both assume. Turning in
+place earns phase through the rotation term; a pause earns none. Phase by time
+gave the peg_in_hole master's near-stationary end 23 % of phi, so runs that reached
+the goal ended at phi 0.65 to 0.75.
 
 A datapoint's phase is that of the nearest master sample by peg_tcp pose, in
 the product metric of R^3 x SO(3): d^2 = |dp|^2 + (l * theta)^2, theta the
@@ -73,8 +76,14 @@ def pose_distance(
     return np.sqrt(((p_a - p_b) ** 2).sum(axis=-1) + rotation**2)
 
 
-def master_phases(t: np.ndarray) -> np.ndarray:  # (N,) s -> (N,) in [0, 1]
-    return t / t[-1]
+def master_phases(
+    p: np.ndarray,  # (N, 3) m
+    quat: np.ndarray,  # (N, 4)
+    rotation_length: float,  # m per rad
+) -> tuple[np.ndarray, float]:  # (N,) in [0, 1], and the master's length in m
+    """Normalised arc length by pose distance; a sample that did not move keeps its phase."""
+    arc = np.cumsum(pose_distance(p[1:], quat[1:], p[:-1], quat[:-1], rotation_length))
+    return np.concatenate([[0.0], arc / arc[-1]]), float(arc[-1])
 
 
 def project(context: PhaseContext) -> np.ndarray:  # (M,)
@@ -95,6 +104,42 @@ def neighbour_distance(d: np.ndarray) -> tuple[int, float]:  # (M, M) pairwise d
     d = d.copy()
     np.fill_diagonal(d, np.inf)
     return k, float(np.median(np.sort(d, axis=1)[:, k - 1]))
+
+
+def corridor_points(
+    P: np.ndarray,  # (N, 2) m, the master in the plane
+    phi: np.ndarray,  # (N,) its phases
+    spacing: float,  # m along the master between stations
+    offset: float,  # m to either side
+) -> tuple[np.ndarray, np.ndarray]:  # (3 S, 2) m and (3 S,) phases
+    """A sparse band beside the master: at each station a point on it and one to either side.
+
+    The stations are resampled by arc length, so a pause adds none, and the normal is
+    taken between stations, so it does not follow the recording's sample noise.
+    """
+    arc = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))])
+    stations = np.arange(0.0, arc[-1] + spacing / 2, spacing)
+    centre = np.column_stack([np.interp(stations, arc, P[:, i]) for i in range(2)])
+    tangent = np.gradient(centre, axis=0)
+    normal = np.column_stack([-tangent[:, 1], tangent[:, 0]])
+    normal = offset * normal / np.linalg.norm(normal, axis=1, keepdims=True)
+    points = np.vstack([centre - normal, centre, centre + normal])
+    return points, np.tile(np.interp(stations, arc, phi), 3)
+
+
+def widen_across(
+    points: np.ndarray,  # (M, 2) m
+    origin: np.ndarray,  # (2,) m, a point of the line they are spread across
+    along: np.ndarray,  # (2,) the line's direction
+    extra: float,  # m
+) -> np.ndarray:  # (M, 2) m
+    """The points spread further across a line, in proportion, the furthest by extra.
+
+    Their positions along the line are kept, and so is their order across it.
+    """
+    normal = np.array([-along[1], along[0]]) / np.linalg.norm(along)
+    lateral = (points - origin) @ normal
+    return points + np.outer(lateral * extra / np.abs(lateral).max(), normal)
 
 
 def phase_weights(
@@ -138,20 +183,19 @@ def coefficient_density(
 def phase_context(
     master_path: Path, q: np.ndarray, pin_model: AgxPinocchio, rotation_length: float = 0.0
 ) -> PhaseContext:  # q (M, 6) rad, the datapoints; rotation_length m per rad
-    t_master, q_master = load_recording(master_path)
+    _, q_master = load_recording(master_path)
     (p, quat), (p_master, quat_master) = tcp_poses(pin_model, q), tcp_poses(pin_model, q_master)
     length = rotation_length
     k, h = neighbour_distance(pose_distance(p[:, None], quat[:, None], p[None], quat[None], length))
     # phi spans 1, so the master's length is its length per unit phase.
-    steps = pose_distance(p_master[1:], quat_master[1:], p_master[:-1], quat_master[:-1], length)
-    dl_dphi = float(steps.sum())
+    phi_master, dl_dphi = master_phases(p_master, quat_master, length)
     return PhaseContext(
         p=p,
         quat=quat,
         q_master=q_master,
         p_master=p_master,
         quat_master=quat_master,
-        phi_master=master_phases(t_master),
+        phi_master=phi_master,
         rotation_length=rotation_length,
         k=k,
         h=h,

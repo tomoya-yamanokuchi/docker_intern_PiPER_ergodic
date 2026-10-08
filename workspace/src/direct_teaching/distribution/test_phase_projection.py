@@ -12,6 +12,7 @@ from direct_teaching.distribution.phase_projection import (
     LEAD_SCALE,
     PhaseContext,
     coefficient_density,
+    corridor_points,
     master_phases,
     neighbour_distance,
     phase_context,
@@ -20,6 +21,7 @@ from direct_teaching.distribution.phase_projection import (
     project,
     rotation_angle,
     save_phase_labels,
+    widen_across,
 )
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 
@@ -29,15 +31,14 @@ URDF_PATH = (
 
 
 def _l_shaped_master() -> tuple[np.ndarray, np.ndarray]:  # (N, 3) m, (N,) phases
-    """0.05 m along x, then 0.05 m along y, sampled unevenly in time."""
-    rng = np.random.default_rng(0)
+    """0.05 m along x, then 0.05 m along y."""
     n = 60
     S = np.zeros((2 * n, 3))
     S[:n, 0] = np.linspace(0.0, 0.05, n)
     S[n:, 0] = 0.05
     S[n:, 1] = np.linspace(0.05 / n, 0.05, n)
-    t = np.concatenate([[0.0], np.cumsum(rng.uniform(0.5, 1.5, 2 * n - 1))])
-    return S, master_phases(t)
+    phi, _ = master_phases(S, np.tile([1.0, 0.0, 0.0, 0.0], (2 * n, 1)), 0.06)
+    return S, phi
 
 
 def _context(p: np.ndarray, p_master: np.ndarray, phi_master: np.ndarray) -> PhaseContext:
@@ -57,6 +58,17 @@ def _context(p: np.ndarray, p_master: np.ndarray, phi_master: np.ndarray) -> Pha
         dl_dphi=0.0,
         sigma_f=0.0,
     )
+
+
+def test_master_phase_is_arc_length_and_a_pause_earns_none() -> None:
+    """0.03 m along x, a pause, then a 0.5 rad turn in place worth l * 0.5 = 0.03 m."""
+    p = np.zeros((5, 3))
+    p[1:, 0] = [0.015, 0.03, 0.03, 0.03]
+    quat = np.tile([1.0, 0.0, 0.0, 0.0], (5, 1))
+    quat[4] = Rotation.from_rotvec([0.0, 0.0, 0.5]).as_quat(scalar_first=True)
+    phi, length = master_phases(p, quat, 0.06)
+    np.testing.assert_allclose(phi, [0.0, 0.25, 0.5, 0.5, 1.0], atol=1e-12)
+    assert np.isclose(length, 0.06)
 
 
 def test_master_samples_project_to_their_own_phase() -> None:
@@ -148,6 +160,47 @@ def test_datapoints_on_the_master_get_its_phase() -> None:
         with np.load(labelled_path) as data:
             assert float(data["rotation_length"]) == 0.06
     assert context.sigma_f > 0
+
+
+def test_corridor_points_lie_at_the_offset_beside_an_arc() -> None:
+    """A quarter circle of radius 0.2 m: the band is the circles of radius 0.19, 0.2 and 0.21,
+    a station every 10 mm of arc, each with the phase of its own angle."""
+    angle = np.linspace(0.0, np.pi / 2, 2001)
+    P = 0.2 * np.column_stack([np.cos(angle), np.sin(angle)])
+    points, phi = corridor_points(P, angle / angle[-1], spacing=0.01, offset=0.01)
+    S = len(points) // 3
+    assert round(0.2 * np.pi / 2 / 0.01) + 1 == S
+    radius = np.linalg.norm(points, axis=1).reshape(3, S)
+    # The end stations' normals are one-sided differences, half a station's turn off.
+    np.testing.assert_allclose(radius, np.array([[0.21], [0.2], [0.19]]) * np.ones(S), atol=1e-5)
+    np.testing.assert_allclose(np.arctan2(points[:, 1], points[:, 0]) / angle[-1], phi, atol=2e-3)
+    np.testing.assert_allclose(np.diff(phi[:S]), 0.01 / (0.2 * np.pi / 2), atol=1e-6)
+
+
+def test_corridor_points_ignore_a_pause_in_the_master() -> None:
+    line = np.column_stack([np.linspace(0.0, 0.1, 101), np.zeros(101)])
+    paused = np.vstack([line[:50], np.tile(line[50], (300, 1)), line[50:]])
+    phi = np.linspace(0.0, 1.0, 101)
+    paused_phi = np.concatenate([phi[:50], np.full(300, phi[50]), phi[50:]])
+    points, labels = corridor_points(line, phi, 0.01, 0.01)
+    points_paused, labels_paused = corridor_points(paused, paused_phi, 0.01, 0.01)
+    np.testing.assert_allclose(points_paused, points, atol=1e-12)
+    np.testing.assert_allclose(labels_paused, labels, atol=1e-12)
+    np.testing.assert_allclose(points[:11], np.column_stack([line[::10, 0], np.full(11, -0.01)]))
+
+
+def test_widen_across_moves_the_furthest_point_by_extra_and_keeps_the_rest_in_proportion() -> None:
+    """Across the x axis it is y scaled by 1 + extra / max |y|; any other line is that, rotated."""
+    rng = np.random.default_rng(3)
+    points = rng.uniform(-0.04, 0.04, (30, 2))
+    wide = widen_across(points, np.zeros(2), np.array([2.0, 0.0]), extra=0.01)
+    scale = 1 + 0.01 / np.abs(points[:, 1]).max()
+    np.testing.assert_allclose(wide, points * [1.0, scale], atol=1e-15)
+    assert np.isclose(np.abs(wide[:, 1]).max() - np.abs(points[:, 1]).max(), 0.01)
+    c, s, origin = np.cos(0.7), np.sin(0.7), np.array([0.3, -0.1])
+    turn = np.array([[c, -s], [s, c]])
+    turned = widen_across(points @ turn.T + origin, origin, turn @ [1.0, 0.0], extra=0.01)
+    np.testing.assert_allclose(turned, wide @ turn.T + origin, atol=1e-15)
 
 
 if __name__ == "__main__":

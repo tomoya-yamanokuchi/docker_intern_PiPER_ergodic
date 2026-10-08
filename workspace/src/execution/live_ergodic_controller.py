@@ -42,7 +42,11 @@ from scipy.spatial.transform import Rotation as R
 
 from controller.feed_forward import FeedForward
 from controller.task_imp_controller import CartesianImpedanceController, orientation_error
-from direct_teaching.distribution.phase_projection import LEAD_SCALE, phase_context
+from direct_teaching.distribution.phase_projection import (
+    LEAD_SCALE,
+    neighbour_distance,
+    phase_context,
+)
 from direct_teaching.distribution.pose_distribution import PoseDistribution
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 from ergodic_controller.ergodic_controller import ErgodicController
@@ -137,10 +141,16 @@ def prepare_exploration(recording: Path) -> Exploration:
     )
 
 
-def prepare_phase_exploration(
-    master: Path, labelled: Path, beta: float = 1.0, planar: bool = True
-) -> Exploration:
-    """prepare_exploration with the phase-conditioned law, before the arm is touched.
+def prepare_phase_law(
+    master: Path,
+    labelled: Path,
+    beta: float = 1.0,
+    planar: bool = True,
+    track_master: bool = False,
+) -> tuple[CartesianImpedanceController, PoseDistribution, PhaseErgodicController, np.ndarray]:
+    """The impedance controller, the cube, the phase law, and the master's two end positions.
+
+    Apart from prepare_phase_exploration so a replay can build the law without a viewer.
 
     labelled is a file from label_datapoint_phases.py. The datapoints' GMM is
     fitted only for its cube, so the gains, MAX_SPEED and the interpolator see the
@@ -150,6 +160,11 @@ def prepare_phase_exploration(
     planar runs the law on x-y and projects the phase on x-y. Otherwise the law
     runs on all six axes and the phase is projected on the full pose, with the l
     the file was labelled with.
+
+    track_master makes the target the master itself while the phase progresses, with
+    the datapoints taking over during a stall, and counts an advance of the phase as
+    progress only within one datapoint spacing of something taught. Without it the
+    target is always the datapoints and every advance is progress.
     """
     controller = make_controller(dofs=6)
     with np.load(labelled) as data:
@@ -163,35 +178,52 @@ def prepare_phase_exploration(
         poses = (controller.pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q_rows)
         return np.array([distribution.pose_to_state(p_i, R_i) for p_i, R_i in poses])
 
-    projected = 2 if planar else 3
+    projected, axes = (2, 2) if planar else (3, 6)
+    # The datapoints' spacing in position alone; context.h is in the labels' pose metric.
+    _, h_position = neighbour_distance(np.linalg.norm(context.p[:, None] - context.p[None], axis=2))
+    X_master = to_cube(context.q_master)
     task = PhaseTask(
         X=to_cube(q),
         phi=phi,
-        P_master=to_cube(context.q_master)[:, :projected],
+        P_master=X_master[:, :projected],
         phi_master=context.phi_master,
         # The cube scales each axis differently; back to metres, as the labelling projects.
         span=distribution.upper[:projected] - distribution.lower[:projected],
         sigma_f=context.sigma_f,
-        axes=2 if planar else 6,
+        axes=axes,
         rotation_length=0.0 if planar else rotation_length,
         Q_master=context.quat_master,
         distribution=distribution,
+        X_master=X_master[:, :axes] if track_master else None,
+        # sigma_f of phase is h along the master, walked at MAX_SPEED.
+        progress_steps=context.h / MAX_SPEED * ERGODIC_FREQ_HZ if track_master else 0.0,
+        on_reference=h_position if track_master else np.inf,
     )
     print(
         f"phase: {len(q)} datapoints, sigma_f = {context.sigma_f:.4f}, lead = {LEAD_SCALE * context.sigma_f:.4f}, beta = {beta:g}"
     )
     law = PhaseErgodicController(task, U_MAX, beta, ERGODIC_K)
+    return controller, distribution, law, context.p_master[[0, -1]]
+
+
+def prepare_phase_exploration(
+    master: Path,
+    labelled: Path,
+    beta: float = 1.0,
+    planar: bool = True,
+    track_master: bool = False,
+) -> Exploration:
+    """prepare_exploration with the phase-conditioned law, before the arm is touched."""
+    controller, distribution, law, master_ends = prepare_phase_law(
+        master, labelled, beta, planar, track_master
+    )
     return Exploration(
         controller=controller,
         feed_forward=FeedForward(urdf_path=str(URDF_PATH), dofs=6),
         distribution=distribution,
         ergodic=law,
         live=LiveView(
-            distribution,
-            URDF_PATH,
-            TCP_FRAME_NAME,
-            phase_law=law,
-            master_ends=context.p_master[[0, -1]],
+            distribution, URDF_PATH, TCP_FRAME_NAME, phase_law=law, master_ends=master_ends
         ),
         planar=planar,
     )
