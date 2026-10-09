@@ -294,6 +294,7 @@ workspace/src/
 ├── play_joint_angles.py                    # TOUCHES THE ARM: replay under Cartesian impedance
 ├── identify_friction.py                    # TOUCHES THE ARM: friction from sweeps
 ├── make_sweep_recording.py                 # hardware-free: a synthetic recording to replay
+├── seed_datapoints_from_master.py          # hardware-free: a tube of datapoints around a master, to extend by teaching
 ├── run_ergodic_pipeline.py                 # TOUCHES THE ARM: the online peg-in-hole run (§3)
 ├── run_ergodic_trials.py                   # TOUCHES THE ARM: the N-trial experiment (§3, §5)
 ├── run_ergodic_phase.py                    # TOUCHES THE ARM: phase-conditioned law (ergodic_controller/phase_ergodic_controller.py)
@@ -450,6 +451,31 @@ disk. `u` withdraws from the end of the loaded set, so the last thing added is t
 first thing removable. **Removing an arbitrary datapoint is not supported by
 the script** — do that offline with `load_recording` and `save_datapoints`, which
 is also how a set is merged or split.
+
+### Seeding from a master — `seed_datapoints_from_master.py`
+
+Hardware-free. Writes a `datapoints_*.npz` that covers a master trajectory, so
+`teach_datapoints.py <that file>` only has to add the regions needing extra weight.
+At stations `SPACING` apart along the master, in the pose metric the phase uses
+(`ROTATION_LENGTH = 0.06`, so a stage that only turns the peg gets stations too),
+the set gets the master's own `q` and `PER_STATION` poses scattered uniformly within
+`TUBE_RADIUS` in position and `TUBE_TILT` in orientation. Those go through the
+closed-form IK seeded with the master's `q`; one that is unreachable, or more than
+`BRANCH_TOL` from the master's joint angles (another IK branch), is dropped and
+counted. The scatter's seed is fixed, so a master gives the same file every time.
+The sizes are constants at the top of the file, not flags.
+
+Three things follow from it:
+
+- **The tube does not know the fixture.** The scattered poses were never
+  demonstrated, and a radius wider than the clearance around the master puts target
+  points inside the fixture.
+- **Taught points compete with the seed.** A region's weight is its share of the
+  count, so `SPACING` and `PER_STATION` set how many confirmations a care region
+  needs to stand out. They also largely set `sigma_f`: the seed alone gives 0.046 on
+  the peg_in_hole master, where the hand-taught set gave 0.118.
+- **`u` withdraws from the end of the loaded set**, so undoing past the session's own
+  confirmations removes seeded points.
 
 ### Replay — `play_joint_angles.py`
 
@@ -899,6 +925,7 @@ cd /home/jens/workspace/docker_intern_PiPER_ergodic/workspace/src
 python record_joint_angles.py            # teach: backdrive the arm, Ctrl-C saves
 python teach_datapoints.py               # teach: Enter confirms a pose, u withdraws (§5)
 python teach_datapoints.py <dp>.npz      # ... or load that datapoint set and extend it
+python seed_datapoints_from_master.py <master>.npz   # hardware-free: a <dp>.npz around a master (§5)
 python play_joint_angles.py <rec>.npz    # replay that recording (path is required)
 python run_ergodic_pipeline.py <rec>.npz # the online run; MeshCat on :7000 (§3)
                                          # <rec> is either kind of teaching file
