@@ -57,7 +57,7 @@ from visualization.visualizer import LiveView
 FRONT_SHARE = 0.25
 # The forgetting window, in the steps one sigma_f of progress takes. The notebook's
 # best window was 800 steps where sigma_f of progress took 10.7: 75 of them.
-FORGET_PROGRESS = 75.0
+FORGET_PROGRESS = 50.0
 # The band beside the master: a point on it and one this far to either side, at
 # stations this far apart. Each weighs as one datapoint.
 CORRIDOR_OFFSET = 0.02  # m
