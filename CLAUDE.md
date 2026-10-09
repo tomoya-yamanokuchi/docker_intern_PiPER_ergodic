@@ -13,8 +13,9 @@ tree holding only `agx_reference/`).
    `agx_reference/piper/main_*.py`, `record_joint_angles.py`,
    `teach_datapoints.py`, `play_joint_angles.py`, `identify_friction.py`,
    `run_ergodic_pipeline.py`, `run_ergodic_trials.py`, `run_ergodic_phase.py`,
-   `run_ergodic_phase_6dof.py`, `run_ergodic_phase_trials.py` and
-   `run_ergodic_phase_6dof_trials.py`
+   `run_ergodic_phase_6dof.py`, `run_ergodic_phase_trials.py`,
+   `run_ergodic_phase_6dof_trials.py`, `run_ergodic_expanding.py`,
+   `run_ergodic_expanding_trials.py` and `run_ergodic_expansion_6dof.py`
    — and, generally, anything that imports `pyAgxArm` or
    `execution.executor_helpers`, or calls `robot.connect()`, `robot.enable()`,
    `move_mit`, `move_p` or `move_j`. The user runs those; Claude writes the code
@@ -298,7 +299,10 @@ workspace/src/
 ├── run_ergodic_phase.py                    # TOUCHES THE ARM: phase-conditioned law (ergodic_controller/phase_ergodic_controller.py)
 ├── run_ergodic_phase_6dof.py               # TOUCHES THE ARM: the same on all six axes, phase on the full pose
 ├── run_ergodic_phase_trials.py             # TOUCHES THE ARM: N trials of the planar phase law, memory kept, goal = master's end
-└── run_ergodic_phase_6dof_trials.py        # TOUCHES THE ARM: the same with the 6-DoF law
+├── run_ergodic_phase_6dof_trials.py        # TOUCHES THE ARM: the same with the 6-DoF law
+├── run_ergodic_expanding.py                # TOUCHES THE ARM: expanding-target law, planar (ergodic_controller/EXPANDING_TARGET_METHOD.md)
+├── run_ergodic_expanding_trials.py         # TOUCHES THE ARM: N independent trials of it
+└── run_ergodic_expansion_6dof.py           # TOUCHES THE ARM: the expanding-target law on all six axes
 ```
 
 There are no `__init__.py` files; these are namespace packages. Every `test_*.py`
