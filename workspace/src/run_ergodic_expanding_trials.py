@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """The trialled experiment of run_ergodic_phase_trials.py, run with the expanding law.
 
-One ExpandingErgodicController lives for the whole sequence. A trial boundary resets
-its phase to 0, because the arm starts the task over, and with it the target shrinks
-back to the entry. The statistic is kept whole: every state of every trial stays in
-it, discounted by its age in ergodic steps as within a trial, so what the last trial
-covered still counts as covered when the next begins and fades as that one goes on.
-Nothing is dropped at the boundary, unlike the phase law's trials.
-
-The law is not stepped while the arm is put back, so that time ages nothing and the
-operator's handling path never enters the statistic.
+Every trial starts the law over: its phase and stall go back to 0, so the target
+shrinks back to the entry, and its statistic is emptied, so nothing an earlier trial
+covered counts as covered. The trials are independent repeats of one run, and their
+times measure the law's spread, not learning over the sequence. Carrying the paths
+that ended in a stall into later trials was tried on 2d_key and dropped: they covered
+the way in that every trial needs, and the third trial after the first stall never
+left the entry.
 
 The goal, the backdriving between trials and the outputs are run_ergodic_phase_trials.py's.
 Interactive only, for the reason run_ergodic_trials.py gives.
@@ -36,7 +34,12 @@ from execution.live_ergodic_controller import (
 )
 from run_ergodic_expanding import prepare_expanding_exploration
 from run_ergodic_phase import save_phase_trace
-from run_ergodic_phase_trials import GOAL_RADIUS, reached_goal, save_trials
+from run_ergodic_phase_trials import (
+    GOAL_RADIUS,
+    reached_goal,
+    save_trials,
+    start_trial,
+)
 from run_ergodic_trials import backdrive_to_start, report_trials
 from visualization.visualizer import cumulative_average
 
@@ -49,7 +52,10 @@ def run_one_trial(
     goal: np.ndarray,  # (3,) m
     trial: int,
 ) -> float:  # s, from the first torque to the goal
-    exploration.ergodic.phi = 0.0
+    law = exploration.ergodic
+    start_trial(exploration)
+    law.memory_x.clear()
+    law.memory_phi.clear()
     setpoints = first_setpoints(exploration, q)
     print_start(exploration, q, setpoints)
     print(

@@ -64,6 +64,10 @@ CORRIDOR_SPACING = 0.01  # m
 # to either side at their widest. 0.2 is where 2d_key's master enters the slit.
 ENTRY_PHASE = 0.2
 ENTRY_WIDEN = 0.01  # m
+# The cube reaches this share of each axis' span beyond the datapoints, where the
+# other runs use 0.1: room for the widened entry and the band inside the cube's
+# outer twentieth, where the law is pulled back to the centre.
+CUBE_MARGIN = 0.15
 
 
 def with_wider_entry(
@@ -106,7 +110,7 @@ def prepare_expanding_exploration(master: Path, labelled: Path) -> Exploration:
     """prepare_phase_exploration with the expanding law, before the arm is touched."""
     # track_master only for the task's progress_steps: this law's target is the datapoints'.
     controller, distribution, phase_law, master_ends = prepare_phase_law(
-        master, labelled, planar=True, track_master=True
+        master, labelled, planar=True, track_master=True, margin=CUBE_MARGIN
     )
     _, q_master = load_recording(master)
     poses = (controller.pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q_master)

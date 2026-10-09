@@ -116,12 +116,15 @@ def make_controller(dofs: int) -> CartesianImpedanceController:
 
 
 def fit_distribution(
-    controller: CartesianImpedanceController, t: np.ndarray, q: np.ndarray
+    controller: CartesianImpedanceController,
+    t: np.ndarray,
+    q: np.ndarray,
+    margin: float = 0.1,  # of each axis' span, beyond the data on either side
 ) -> PoseDistribution:
     poses = [controller.pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q]
     p = np.array([p_i for p_i, _ in poses])
     rotations = np.array([R_i for _, R_i in poses])
-    return PoseDistribution(t, p, rotations, N_COMPONENTS)
+    return PoseDistribution(t, p, rotations, N_COMPONENTS, margin)
 
 
 def prepare_exploration(recording: Path) -> Exploration:
@@ -147,6 +150,7 @@ def prepare_phase_law(
     beta: float = 1.0,
     planar: bool = True,
     track_master: bool = False,
+    margin: float = 0.1,
 ) -> tuple[CartesianImpedanceController, PoseDistribution, PhaseErgodicController, np.ndarray]:
     """The impedance controller, the cube, the phase law, and the master's two end positions.
 
@@ -165,13 +169,15 @@ def prepare_phase_law(
     the datapoints taking over during a stall, and counts an advance of the phase as
     progress only within one datapoint spacing of something taught. Without it the
     target is always the datapoints and every advance is progress.
+
+    margin is the cube's, as fit_distribution's.
     """
     controller = make_controller(dofs=6)
     with np.load(labelled) as data:
         q, phi = data["q"], data["phi"]
         # Files labelled before the rotation term carry none: they projected on position alone.
         rotation_length = float(data["rotation_length"]) if "rotation_length" in data else 0.0
-    distribution = fit_distribution(controller, np.arange(len(q), dtype=float), q)
+    distribution = fit_distribution(controller, np.arange(len(q), dtype=float), q, margin)
     context = phase_context(master, q, controller.pin_model, rotation_length)
 
     def to_cube(q_rows: np.ndarray) -> np.ndarray:  # (n, 6) rad -> (n, 6) cube
