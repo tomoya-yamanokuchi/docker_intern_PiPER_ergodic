@@ -155,18 +155,29 @@ def draw_start_goal(
         viewer[name].set_transform(tf.translation_matrix(p))
 
 
+# The grey of a trail point the statistic has forgotten, still visible on the background.
+FORGOTTEN_GREY = 0.8
+
+
 def draw_tcp_paths(
     viewer: meshcat.Visualizer,
     p_measured: np.ndarray,  # (N, 3) m
     p_target: np.ndarray,  # (N, 3) m
+    remembered: np.ndarray | None = None,  # (N,) in [0, 1], 1 the newest
 ) -> None:
-    """Where the TCP went, in black, against where it was commanded to go, in red."""
-    for name, p, color in (
-        ("run/measured", p_measured, [0.0, 0.0, 0.0]),
-        ("run/target", p_target, [1.0, 0.0, 0.0]),
+    """Where the TCP went, in black, against where it was commanded to go, in red.
+
+    With remembered, a measured point fades to light grey as that share goes to 0:
+    what a forgetting statistic no longer holds.
+    """
+    faded = np.zeros(len(p_measured)) if remembered is None else FORGOTTEN_GREY * (1 - remembered)
+    for name, p, colors in (
+        ("run/measured", p_measured, np.tile(faded[:, None], 3)),
+        ("run/target", p_target, np.tile([1.0, 0.0, 0.0], (len(p_target), 1))),
     ):
-        colors = np.tile(np.array(color, np.float32), (len(p), 1))
-        viewer[name].set_object(g.PointCloud(p.T.astype(np.float32), colors.T, size=0.002))
+        viewer[name].set_object(
+            g.PointCloud(p.T.astype(np.float32), colors.T.astype(np.float32), size=0.002)
+        )
 
 
 def show_robot(

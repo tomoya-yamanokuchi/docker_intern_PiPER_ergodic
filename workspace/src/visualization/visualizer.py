@@ -28,7 +28,10 @@ from direct_teaching.distribution.phase_projection import (
 from direct_teaching.distribution.pose_distribution import PoseDistribution
 from direct_teaching.recorder.joint_angle_recorder import load_recording
 from ergodic_controller.ergodic_controller import ErgodicController
-from ergodic_controller.phase_ergodic_controller import PhaseErgodicController
+from ergodic_controller.phase_ergodic_controller import (
+    ExpandingErgodicController,
+    PhaseErgodicController,
+)
 from kinematics.kinematic_solver import KinematicSolver
 from simulation.meshcat_scene import (
     animate_phase_distribution,
@@ -398,7 +401,9 @@ class LiveView:
     A frame draws the arm at the measured q, its TCP triad, and a longer triad at
     the commanded pose, so a tracking error is the gap between the two triads. The
     trails behind them -- measured in black, commanded in red -- are what shows
-    coverage of the cloud while the run is still going.
+    coverage of the cloud while the run is still going. Under an expanding law the
+    measured trail fades to grey with the weight the forgetting statistic still gives
+    each point, so what is black is what the law remembers.
 
     **No drawing happens in the caller's thread.** update() only stores the newest
     state; a daemon thread draws it. A MeshCat message is a zmq round trip to the
@@ -426,6 +431,8 @@ class LiveView:
         self.frame_name = frame_name
         self.measured: list[np.ndarray] = []
         self.commanded: list[np.ndarray] = []
+        # The law's step count at each trail point: its age when the trail is drawn.
+        self.steps: list[int] = []
         self.frames = 0
         # The newest state update() has handed over, or None once it is drawn.
         self.pending: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
@@ -475,8 +482,21 @@ class LiveView:
             if self.frames % TRAIL_DECIMATION == 0:
                 self.measured.append(p)
                 self.commanded.append(p_target)
-                draw_tcp_paths(self.viewer, np.array(self.measured), np.array(self.commanded))
+                self.steps.append(self.phase_law.step_count if self.phase_law else 0)
+                draw_tcp_paths(
+                    self.viewer,
+                    np.array(self.measured),
+                    np.array(self.commanded),
+                    self._remembered(),
+                )
                 self._draw_phase_target()
+
+    def _remembered(self) -> np.ndarray | None:  # (N,) in [0, 1] per trail point
+        """Each trail point's weight in the statistic over the newest one's; None if nothing forgets."""
+        law = self.phase_law
+        if not isinstance(law, ExpandingErgodicController):
+            return None
+        return law.keep ** (law.step_count - np.array(self.steps))
 
     def _draw_phase_target(self) -> None:
         """The phase law's current target density, rebuilt from its newest weights."""
