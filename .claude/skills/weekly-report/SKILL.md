@@ -135,6 +135,7 @@ real bib entry.
 | $\boldsymbol{\omega}$, $\mathbf{h}$, $\alpha$, $\beta$ | per-axis weight of the ergodic command, pull back into the cube, its sharpness and boundary band width |
 | $\mathbf{W}$, $\boldsymbol{\nu}$, $\operatorname{Log}_{\mathrm{SO}(3)}$ | joint torque weights, twist [m/s, rad/s], rotation matrix to full-angle rotation vector (distinct from the half-angle quaternion $\operatorname{Log}$) |
 | $\boldsymbol{\gamma}$, $\mathbf{g}(\mathbf{q})$, $N_{\mathrm{p}}$, $w_m$ | gravity scale, modelled gravity torque $\mathbf{n}(\mathbf{q}, \mathbf{0})$, number of datapoints ($M$ is taken by the mass matrix), GMM sample weight |
+| $\eta$, $\hat{w}^{\mathrm{r}}_m$, $\hat{w}^{\mathrm{f}}_m$, $\lambda$, $n_{\mathrm{f}}$, $n_{\sigma}$ | expanding target: front share, reached and front weights of datapoint $m$; forgetting factor of the statistic, its window in ergodic steps, steps per $\sigma_{\mathrm{f}}$ of progress at $v_{\max}$ |
 
 Add a row here when a new symbol becomes part of the project (for example the
 ergodic metric or the target distribution), so later reports inherit it.
