@@ -14,6 +14,8 @@ further to either side of the master there, so more approaches to it are tried.
 
 The task is planar: the law explores world x-y only. z and the peg's tilt are
 held at the start pose, and rotation about the peg axis is left free.
+run_ergodic_expansion_6dof.py runs the same law on all six axes, without the band
+and the wider entry, which are laid out in the plane.
 
 The phase starts at 0, so place the arm near the master's start pose first, at
 the working height and with the peg at the tilt the run should hold.
@@ -106,16 +108,21 @@ def with_corridor(
     return replace(task, X=np.vstack([task.X, X]), phi=np.concatenate([task.phi, phi]))
 
 
-def prepare_expanding_exploration(master: Path, labelled: Path) -> Exploration:
-    """prepare_phase_exploration with the expanding law, before the arm is touched."""
+def prepare_expanding_exploration(master: Path, labelled: Path, planar: bool = True) -> Exploration:
+    """prepare_phase_exploration with the expanding law, before the arm is touched.
+
+    Not planar, the law runs on all six axes and the target is the datapoints as taught.
+    """
     # track_master only for the task's progress_steps: this law's target is the datapoints'.
     controller, distribution, phase_law, master_ends = prepare_phase_law(
-        master, labelled, planar=True, track_master=True, margin=CUBE_MARGIN
+        master, labelled, planar=planar, track_master=True, margin=CUBE_MARGIN
     )
-    _, q_master = load_recording(master)
-    poses = (controller.pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q_master)
-    X_master = np.array([distribution.pose_to_state(p_i, R_i) for p_i, R_i in poses])
-    task = with_corridor(with_wider_entry(phase_law.task, X_master), X_master)
+    task = phase_law.task
+    if planar:
+        _, q_master = load_recording(master)
+        poses = (controller.pin_model.forward_kinematics(q_i, TCP_FRAME_NAME) for q_i in q_master)
+        X_master = np.array([distribution.pose_to_state(p_i, R_i) for p_i, R_i in poses])
+        task = with_corridor(with_wider_entry(task, X_master), X_master)
     forget_window = FORGET_PROGRESS * task.progress_steps
     print(
         f"expanding: front share {FRONT_SHARE:g}, forgetting over {forget_window:.0f} steps, "
@@ -130,12 +137,12 @@ def prepare_expanding_exploration(master: Path, labelled: Path) -> Exploration:
         live=LiveView(
             distribution, URDF_PATH, TCP_FRAME_NAME, phase_law=law, master_ends=master_ends
         ),
-        planar=True,
+        planar=planar,
     )
 
 
-def main(master: Path, labelled: Path) -> None:
-    exploration = prepare_expanding_exploration(master, labelled)
+def main(master: Path, labelled: Path, planar: bool = True) -> None:
+    exploration = prepare_expanding_exploration(master, labelled, planar)
     _, q_master = load_recording(master)
     goal, _ = exploration.controller.pin_model.forward_kinematics(q_master[-1], TCP_FRAME_NAME)
 
@@ -157,7 +164,7 @@ def main(master: Path, labelled: Path) -> None:
         # Hold before writing, so a failed write cannot leave the arm unheld.
         hold_current_pose(robot, log[-1][1] if log else joint_angles)
         if log:
-            save_run(log, labelled, label="_expanding")
+            save_run(log, labelled, label="_expanding" if planar else "_expanding6")
             save_phase_trace(exploration.ergodic.trace)
     print(f"final phase {exploration.ergodic.phi:.3f} after {exploration.ergodic.step_count} steps")
 

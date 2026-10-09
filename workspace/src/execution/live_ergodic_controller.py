@@ -72,6 +72,12 @@ U_MAX = 3.0  # cube units per second
 # demonstration's span between them would ask for. It also bounds the first
 # interval, where the arm can start outside the cube with the setpoint far away.
 MAX_SPEED = 0.02  # m/s
+# The same for how fast the commanded pose may turn. A 6-DoF setpoint that is almost
+# pure rotation has no linear speed for MAX_SPEED to act on; 0.15 cube units along one
+# orientation axis of peg_in_hole is 0.68 rad. MAX_SPEED over the 0.06 m/rad the 6-DoF
+# phase weighs rotation with, so neither cap is the tighter in that metric. A planar
+# run never turns the commanded pose and never meets it.
+MAX_ANGULAR_SPEED = 0.33  # rad/s
 # Joint 6's soft limit in the planar run, where nothing else holds rotation about
 # the peg. A spring-damper on joint 6 alone, inside the last JOINT6_MARGIN before
 # each URDF limit. At the limit the spring gives 1.5 N*m, about 9x joint 6's static
@@ -298,15 +304,15 @@ def plan_interval(
     orientation axes are half-angle quaternion logarithms.
 
     Scaling the whole step keeps the path's direction, so the rotation slows by the
-    same factor as the translation. Only the linear speed is capped, so a segment
-    that is almost pure rotation is bounded by the setpoint geometry rather than by
-    MAX_SPEED.
+    same factor as the translation. MAX_ANGULAR_SPEED caps the turning rate the same
+    way, and the tighter of the two caps sets the scale.
     """
     p_from, R_from = distribution.state_to_pose(x_from)
     p_next, R_next = distribution.state_to_pose(x_next)
     twist = np.concatenate([p_next - p_from, orientation_error(R_next, R_from)]) / dt
-    speed = float(np.linalg.norm(twist[:3]))
-    scale = min(1.0, MAX_SPEED / speed) if speed > 0.0 else 1.0
+    rates = (float(np.linalg.norm(twist[:3])), float(np.linalg.norm(twist[3:])))
+    caps = (MAX_SPEED, MAX_ANGULAR_SPEED)
+    scale = min([1.0] + [cap / rate for cap, rate in zip(caps, rates, strict=True) if rate > 0.0])
     return scale * (x_next - x_from) / cycles, scale * twist
 
 

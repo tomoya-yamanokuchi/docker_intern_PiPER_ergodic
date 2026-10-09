@@ -300,12 +300,8 @@ def test_expanding_law_explores_a_straight_task_to_its_end() -> None:
     assert steps[0.25] < steps[0.0], steps
 
 
-def test_phase_follows_a_pure_rotation_through_the_cube() -> None:
-    """A master that only turns joint 6, so peg_tcp stays put: only the rotation term can see it.
-
-    The clock reads the orientation back out of the cube state; the expected phase is the
-    master sample the state was made from.
-    """
+def _rotation_task() -> tuple[PhaseTask, np.ndarray]:
+    """A master that only turns joint 6 by 1 rad, so peg_tcp stays put; its cube states (101, 6)."""
     pin_model = AgxPinocchio(str(URDF_PATH))
     q_start = np.array([0.0, 1.0, -1.0, 0.0, 0.5, 0.0])
     q_master = np.tile(q_start, (101, 1))
@@ -326,11 +322,45 @@ def test_phase_follows_a_pure_rotation_through_the_cube() -> None:
         Q_master=quat,
         distribution=distribution,
     )
+    return task, X
+
+
+def test_phase_follows_a_pure_rotation_through_the_cube() -> None:
+    """Only the rotation term can see a master that turns in place.
+
+    The clock reads the orientation back out of the cube state; the expected phase is the
+    master sample the state was made from.
+    """
+    task, X = _rotation_task()
     phase = PhaseErgodicController(task, u_max=1.0, K=K)
     # Steps of 0.1, inside the window's 0.12 ahead.
     for i in (10, 20, 30, 40):
         phase.step(X[i], 0.01)
-        assert np.isclose(phase.phi, phi_master[i]), (i, phase.phi)
+        assert np.isclose(phase.phi, np.linspace(0.0, 1.0, 101)[i]), (i, phase.phi)
+
+
+def test_expanding_law_turns_a_peg_in_place_to_the_end_in_six_dof() -> None:
+    """Closed loop on all six axes with ideal tracking, on the master that only turns.
+
+    Nothing but the expanding target moves the state and nothing but the rotation term
+    moves the phase, so reaching the end shows the two work together; the target at
+    the end is checked against its formula, written out.
+    """
+    task, X = _rotation_task()
+    law = ExpandingErgodicController(task, 1.0, forget_window=400.0, front_share=0.25, K=K)
+    x, steps = X[0].copy(), 0
+    while law.phi < 0.99 and steps < 4000:
+        x = law.step(x, 0.005)
+        steps += 1
+    assert law.phi >= 0.99, (law.phi, steps)
+    a, _ = law.point_weights()
+    d = task.phi - min(1.0, law.phi + task.sigma_f)
+    f = np.exp(-(d**2) / (2 * task.sigma_f**2))
+    r = np.where(d > 0, f, 1.0)
+    np.testing.assert_allclose(
+        -a[: len(task.X)], 0.75 * r / r.sum() + 0.25 * f / f.sum(), atol=1e-15
+    )
+    assert len(x) == 6 and np.all((x >= 0.0) & (x <= 1.0))
 
 
 if __name__ == "__main__":
