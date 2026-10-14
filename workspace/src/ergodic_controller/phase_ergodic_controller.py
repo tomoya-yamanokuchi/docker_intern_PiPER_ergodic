@@ -133,6 +133,7 @@ class PhaseErgodicController:
         self.cores = tt.vector.to_list(self.tt_lambda)
         self.phi, self.stall, self.last_progress = 0.0, 0, 0.0
         self.lag = 0.0  # steps the arm is behind the reference clock
+        self.advance_on_reference = False  # phi advances only onto something taught
         # Every taught position on the projected axes, datapoints then master, with its phase.
         self._taught = np.vstack([task.X[:, : len(task.span)], task.P_master])
         self._taught_phi = np.concatenate([task.phi, task.phi_master])
@@ -167,11 +168,11 @@ class PhaseErgodicController:
             quat = Rotation.from_matrix(R_x).as_quat(scalar_first=True)
             d2 = d2 + (task.rotation_length * rotation_angle(task.Q_master[window], quat)) ** 2
         phi_hat = float(task.phi_master[window][np.argmin(d2)])
-        if phi_hat > self.phi:
+        if phi_hat > self.phi and (not self.advance_on_reference or self._on_reference(x, phi_hat)):
             if int(phi_hat / EVENT_STEP) > int(self.phi / EVENT_STEP):
                 print(f"phase: phi {self.phi:.3f} -> {phi_hat:.3f} at step {self.step_count}")
             self.phi = phi_hat
-        self._count_stall(self._on_reference(x))
+        self._count_stall(self._on_reference(x, self.phi))
 
     def _count_stall(self, on_reference: bool) -> None:
         """The stall counter after a step.
@@ -205,12 +206,12 @@ class PhaseErgodicController:
         else:
             self.stall, self._capped = 0, False
 
-    def _on_reference(self, x: np.ndarray) -> bool:
-        """Whether x is within task.on_reference of a taught position of the current phase."""
+    def _on_reference(self, x: np.ndarray, phi: float) -> bool:
+        """Whether x is within task.on_reference of a taught position of phase phi."""
         task = self.task
         if np.isinf(task.on_reference):
             return True
-        near = np.abs(self._taught_phi - self.phi) <= task.sigma_f
+        near = np.abs(self._taught_phi - phi) <= task.sigma_f
         d2 = (((self._taught[near] - x[: len(task.span)]) * task.span) ** 2).sum(axis=1)
         return bool(near.any() and d2.min() <= task.on_reference**2)
 
@@ -291,6 +292,9 @@ class ExpandingErgodicController(PhaseErgodicController):
     ):
         super().__init__(task, u_max, K=K)
         self.keep = 1.0 if forget_window is None else 1.0 - 1.0 / forget_window
+        # The target is gated by phi alone here, so phi must not advance off what was taught:
+        # a peg that missed the hole and came down beyond it would open the next stage.
+        self.advance_on_reference = True
         self.front_share = front_share
 
     def point_weights(self) -> tuple[np.ndarray, float]:  # (fixed + n,), sigma_b
