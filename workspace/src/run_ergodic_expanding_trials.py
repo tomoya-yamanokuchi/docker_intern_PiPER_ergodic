@@ -9,6 +9,10 @@ that ended in a stall into later trials was tried on 2d_key and dropped: they co
 the way in that every trial needs, and the third trial after the first stall never
 left the entry.
 
+In 6-DoF (run_ergodic_expansion_6dof_trials.py) a trial ends on the operator's Enter,
+as in run_ergodic_trials.py, not at the master's last position: with a peg mounted
+off its modelled place the two are not the same.
+
 The goal, the backdriving between trials and the outputs are run_ergodic_phase_trials.py's.
 Interactive only, for the reason run_ergodic_trials.py gives.
 
@@ -40,7 +44,7 @@ from run_ergodic_phase_trials import (
     save_trials,
     start_trial,
 )
-from run_ergodic_trials import backdrive_to_start, report_trials
+from run_ergodic_trials import backdrive_to_start, drain_stdin, enter_pressed, report_trials
 from visualization.visualizer import cumulative_average
 
 
@@ -58,17 +62,29 @@ def run_one_trial(
     law.memory_phi.clear()
     setpoints = first_setpoints(exploration, q)
     print_start(exploration, q, setpoints)
-    print(
-        f"trial {trial}: exploring until the peg tip is within {GOAL_RADIUS} m of {np.round(goal, 4)} m"
-    )
+    if exploration.planar:
+        print(
+            f"trial {trial}: exploring until the peg tip is within {GOAL_RADIUS} m of {np.round(goal, 4)} m"
+        )
+    else:
+        # A newline typed before the trial must not end it.
+        drain_stdin()
+        print(f"trial {trial}: exploring until Enter confirms the insertion")
     log = []
     try:
         return explore(
-            robot, exploration, setpoints, log, stop=lambda q: reached_goal(exploration, q, goal)
+            robot,
+            exploration,
+            setpoints,
+            log,
+            stop=lambda q: (
+                reached_goal(exploration, q, goal) if exploration.planar else enter_pressed()
+            ),
         )
     finally:
         if log:
-            save_run(log, labelled, label=f"_expanding_trial{trial}")
+            label = "_expanding" if exploration.planar else "_expanding6"
+            save_run(log, labelled, label=f"{label}_trial{trial}")
 
 
 def run_trials(
@@ -103,8 +119,8 @@ def run_trials(
     report_trials(path, trials)
 
 
-def main(master: Path, labelled: Path, n_trials: int) -> None:
-    exploration = prepare_expanding_exploration(master, labelled)
+def main(master: Path, labelled: Path, n_trials: int, planar: bool = True) -> None:
+    exploration = prepare_expanding_exploration(master, labelled, planar)
     robot = connect_arm()
     run_trials(robot, exploration, master, labelled, n_trials)
 
