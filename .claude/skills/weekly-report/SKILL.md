@@ -136,6 +136,8 @@ real bib entry.
 | $\mathbf{W}$, $\boldsymbol{\nu}$, $\operatorname{Log}_{\mathrm{SO}(3)}$ | joint torque weights, twist [m/s, rad/s], rotation matrix to full-angle rotation vector (distinct from the half-angle quaternion $\operatorname{Log}$) |
 | $\boldsymbol{\gamma}$, $\mathbf{g}(\mathbf{q})$, $N_{\mathrm{p}}$, $w_m$ | gravity scale, modelled gravity torque $\mathbf{n}(\mathbf{q}, \mathbf{0})$, number of datapoints ($M$ is taken by the mass matrix), GMM sample weight |
 | $\eta$, $\hat{w}^{\mathrm{r}}_m$, $\hat{w}^{\mathrm{f}}_m$, $\lambda$, $n_{\mathrm{f}}$, $n_{\sigma}$ | expanding target: front share, reached and front weights of datapoint $m$; forgetting factor of the statistic, its window in ergodic steps, steps per $\sigma_{\mathrm{f}}$ of progress at $v_{\max}$ |
+| $\mathcal{P}$, $\mathbf{m}_a$, $N_{\mathrm{m}}$, $\varphi^{\mathrm{t}}_{\ell}$, $n_{\mathrm{r}}$, $n_{\mathrm{s}}$, $\ell^*$ | negative-progress memory: permanent states, master sample $a = 0,\dots,N_{\mathrm{m}}$, tracked phase, retreat window [steps], states stored per retreat, step the retreat began at |
+| $\tilde{\varphi}$, $A_{\mathbf{k}}$, $Z$, $T_{\mathrm{f}}$, $G$, $h_{\mathrm{c}}$, $\Delta_{\mathrm{d}}$, $\chi_j$, $\Psi^{(j)}_{\mathbf{k}}$, $t_j$, $t_{\mathrm{p},j}$, $T_{\mathrm{m}}$ | forgetting with marks: tube-gated phase (can fall), forgetting numerator and normaliser, forgetting time constant [s] ($\lambda = e^{-\Delta t/T_{\mathrm{f}}}$), CUSUM statistic and threshold, phase-drop threshold, mark mass [s] and shape, firing time, time of the phase peak before it, mark decay time constant [s] |
 
 Add a row here when a new symbol becomes part of the project (for example the
 ergodic metric or the target distribution), so later reports inherit it.
