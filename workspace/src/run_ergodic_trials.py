@@ -70,10 +70,11 @@ from visualization.visualizer import cumulative_average, save_trial_times_plot, 
 PLACEMENT_PRINT_CYCLES = 50  # at CONTROL_FREQ_HZ, a placement line every 0.5 s
 
 # The hole, as a sphere the peg tip has to reach for a trial to count as a success.
-# The centre is the mean peg_tcp position over the ten confirmed insertions of
-# 2026-09-25, which all sit within 5.4 mm of it; the radius covers that spread with
-# margin. Both are bench geometry: re-measure them if the fixture moves.
-GOAL_TCP = np.array([0.28276, 0.00599, 0.00373])  # m, in the base frame
+# The centre is the mean peg_tcp position over the 19 datapoints at the bottom of the
+# hole (z < 3 mm) in datapoints_20261019_141355.npz, which all sit within 1.3 mm of
+# it; the radius covers that spread with margin. Both are bench geometry: re-measure
+# them if the fixture moves, as it did by 116 mm between 2026-09-25 and 2026-10-19.
+GOAL_TCP = np.array([0.25063, -0.10506, 0.00100])  # m, in the base frame
 GOAL_RADIUS = 0.005  # m
 
 
