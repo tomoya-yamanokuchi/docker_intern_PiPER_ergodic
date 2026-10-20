@@ -283,7 +283,7 @@ def first_setpoints(
 
 
 def plan_interval(
-    distribution: PoseDistribution,
+    exploration: Exploration,
     x_from: np.ndarray,  # (6,) cube units, where the interpolator stands now
     x_next: np.ndarray,  # (6,) cube units, the setpoint to walk toward
     dt: float,  # s, the ergodic step period
@@ -304,14 +304,17 @@ def plan_interval(
     orientation axes are half-angle quaternion logarithms.
 
     Scaling the whole step keeps the path's direction, so the rotation slows by the
-    same factor as the translation. MAX_ANGULAR_SPEED caps the turning rate the same
-    way, and the tighter of the two caps sets the scale.
+    same factor as the translation. For the phase laws MAX_ANGULAR_SPEED caps the
+    turning rate the same way, and the tighter of the two caps sets the scale. Plain
+    E2T2 keeps the linear cap alone, as its trials ran before the angular one existed.
     """
+    distribution = exploration.distribution
     p_from, R_from = distribution.state_to_pose(x_from)
     p_next, R_next = distribution.state_to_pose(x_next)
     twist = np.concatenate([p_next - p_from, orientation_error(R_next, R_from)]) / dt
     rates = (float(np.linalg.norm(twist[:3])), float(np.linalg.norm(twist[3:])))
-    caps = (MAX_SPEED, MAX_ANGULAR_SPEED)
+    plain = isinstance(exploration.ergodic, ErgodicController)
+    caps = (MAX_SPEED, np.inf if plain else MAX_ANGULAR_SPEED)
     scale = min([1.0] + [cap / rate for cap, rate in zip(caps, rates, strict=True) if rate > 0.0])
     return scale * (x_next - x_from) / cycles, scale * twist
 
@@ -498,12 +501,11 @@ def explore(
     exception, which is a single open-ended run; the trialled experiment passes a
     predicate that fires when the peg reaches the hole.
     """
-    distribution = exploration.distribution
     x_cmd, x_next = setpoints
     period = 1.0 / CONTROL_FREQ_HZ
     ergodic_period = 1.0 / ERGODIC_FREQ_HZ
     cycles_per_step = round(CONTROL_FREQ_HZ / ERGODIC_FREQ_HZ)
-    step, twist = plan_interval(distribution, x_cmd, x_next, ergodic_period, cycles_per_step)
+    step, twist = plan_interval(exploration, x_cmd, x_next, ergodic_period, cycles_per_step)
     t0 = time.monotonic()
     # while True rather than a for over itertools.count(), so the only way out is a
     # return, an interrupt or an exception, and there is no unreachable tail.
@@ -515,9 +517,7 @@ def explore(
         # Not at cycle 0: the caller has already taken that step.
         if cycle and cycle % cycles_per_step == 0:
             x_next = next_setpoint(exploration, joint_angles, ergodic_period, x_cmd)
-            step, twist = plan_interval(
-                distribution, x_cmd, x_next, ergodic_period, cycles_per_step
-            )
+            step, twist = plan_interval(exploration, x_cmd, x_next, ergodic_period, cycles_per_step)
         x_cmd = x_cmd + step
         target = commanded_pose(exploration, x_cmd, joint_angles)
         cmd_torque = run_control_cycle(robot, exploration, joint_angles, target, twist)
