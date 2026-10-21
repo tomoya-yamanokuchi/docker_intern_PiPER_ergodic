@@ -16,6 +16,8 @@ tree holding only `agx_reference/`).
    `run_ergodic_phase_6dof.py`, `run_ergodic_phase_trials.py`,
    `run_ergodic_phase_6dof_trials.py`, `run_ergodic_expanding.py`,
    `run_ergodic_expanding_trials.py` and `run_ergodic_expansion_6dof.py`
+   — and, in `final/src/`, `record_master.py`, `teach_exploration.py` and
+   `run_trials.py` (`simulate.py` there drives them on a fake arm and is safe)
    — and, generally, anything that imports `pyAgxArm` or
    `execution.executor_helpers`, or calls `robot.connect()`, `robot.enable()`,
    `move_mit`, `move_p` or `move_j`. The user runs those; Claude writes the code

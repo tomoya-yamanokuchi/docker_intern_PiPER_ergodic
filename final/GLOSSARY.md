@@ -10,6 +10,12 @@ A task whose later stage is physically impossible until an earlier stage has suc
 **Peg-slide**:
 The 2-D sequential task: insert the peg tip into the slot of a block from above, then push the block to the goal.
 
+**Locked door**:
+The 6-DoF sequential task on the arm: insert the key into the lock, turn it to unlock, then push the door open.
+
+**Tool**:
+What the arm holds and moves through the task: the peg or the key.
+
 **Clearance**:
 The play the peg tip has in the slot on either side of its centre.
 _Avoid_: tolerance, gap
@@ -46,12 +52,19 @@ A failed trial in which the barrier still stands at the end. Together with slip-
 The one taught motion, resampled at equal arc length, against which progress is measured.
 _Avoid_: reference trajectory, nominal path
 
+**Exploration distribution**:
+The datapoints taught for a task, one confirmed pose at a time. The target is built from it.
+_Avoid_: reference distribution, cloud
+
 **Datapoint**:
-One taught state, labelled with the phase of its nearest master sample. The target is built from the datapoints.
+One taught state of the exploration distribution, labelled with the phase of its nearest master sample.
 _Avoid_: sample, demo point
 
+**Labelling**:
+Giving every datapoint the phase of its nearest master sample. It needs only the master and the datapoints, never the arm.
+
 **Phase**:
-How far along the master the task has come, from 0 at its start to 1 at its end. It is estimated from the peg's pose alone, so in a world that deviates from the taught one it can be wrong: a pose can look like a later stage although an earlier one never succeeded.
+How far along the master the task has come, from 0 at its start to 1 at its end. It is estimated from the tool's pose alone, so in a world that deviates from the taught one it can be wrong: a pose can look like a later stage although an earlier one never succeeded.
 _Avoid_: progress, stage index
 
 **Front**:
@@ -60,7 +73,7 @@ The phase up to which the sliding target holds datapoints: the current phase plu
 ## Method
 
 **Sensorless**:
-Knowing only the robot's joint angles, and so the peg's pose: no force, contact or vision sensing. Everything the method knows about the world, including the phase, comes from these.
+Knowing only the robot's joint angles, and so the tool's pose: no force, contact or vision sensing. Everything the method knows about the world, including the phase, comes from these.
 
 **Target**:
 The distribution the law tries to match, as coefficients.
@@ -76,7 +89,7 @@ The phase rising one resolvable width above the lowest phase it has reached sinc
 The time since the last advance.
 
 **Retry**:
-The sliding target's back edge retreating during a stall, one stage per forgetting horizon, so that earlier stages return to the target.
+The sliding target's back edge retreating during a stall, one stage per forgetting horizon, so that earlier stages return to the target. A key that missed the keyhole, read as turning, is recovered this way within the trial.
 
 **Statistic**:
 The record of where the robot has been, as coefficients.
