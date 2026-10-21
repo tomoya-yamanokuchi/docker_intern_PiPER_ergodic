@@ -68,7 +68,7 @@ How far along the master the task has come, from 0 at its start to 1 at its end.
 _Avoid_: progress, stage index
 
 **Front**:
-The phase up to which the sliding target holds datapoints: the current phase plus one resolvable width.
+The phase up to which the sliding target holds datapoints: the current phase plus two resolvable widths.
 
 ## Method
 
@@ -80,7 +80,7 @@ The distribution the law tries to match, as coefficients.
 _Avoid_: reference distribution, goal distribution
 
 **Sliding target**:
-A target holding only the datapoints within one resolvable width of the phase, behind it and ahead, so it moves along the master as the phase rises or falls.
+A target holding only the datapoints from the phase up to two resolvable widths ahead of it, nothing behind, so it moves along the master as the phase rises or falls.
 
 **Advance**:
 The phase rising one resolvable width above the lowest phase it has reached since the last advance.

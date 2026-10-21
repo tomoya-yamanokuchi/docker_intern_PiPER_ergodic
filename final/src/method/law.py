@@ -71,9 +71,10 @@ def tt_weighted_sum(rows: list[np.ndarray], w: np.ndarray) -> tt.vector:
 
 
 def sliding_weights(phi, phi_p, delta, rho=0.0):
-    """(N_P,) of sum 1: the datapoints within delta of the phase; rho is the back edge's retreat."""
-    w = 1.0 / (1.0 + np.exp(-(phi + delta - phi_p) / delta))
-    w = w / (1.0 + np.exp(-(phi_p - phi + delta + rho) / delta))
+    """(N_P,) of sum 1: the datapoints from the phase to 2 delta ahead; rho is the back edge's
+    retreat. Nothing behind the phase: what the statistic forgets there would draw the law back."""
+    w = 1.0 / (1.0 + np.exp(-(phi + 2 * delta - phi_p) / delta))
+    w = w / (1.0 + np.exp(-(phi_p - phi + rho) / delta))
     return w / w.sum()
 
 
