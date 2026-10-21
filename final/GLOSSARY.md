@@ -1,6 +1,6 @@
 # Sequential ergodic exploration
 
-The final implementation of ergodic exploration (E2T2, tensor-train) for sequential contact tasks, extended with an expanding target and a forgetting statistic.
+The final implementation of ergodic exploration (E2T2, tensor-train) for sequential contact tasks, extended with a sliding target and a forgetting statistic.
 
 ## Task
 
@@ -20,6 +20,14 @@ _Avoid_: displacement, perturbation, shift
 
 **Taught world**:
 The world at offset 0, where the demonstrations were made.
+
+**Tilt**:
+The peg's angle from vertical. It is part of the state the law explores.
+_Avoid_: orientation, rotation
+
+**Jam**:
+The peg wedged in the slot: tilted too far for its depth, so it cannot go deeper until it tilts back or withdraws. The deeper the peg, the less tilt it tolerates.
+_Avoid_: stuck, wedge
 
 **Dead end**:
 A region where the tip can never progress while the barrier stands: beside the block below its top, or against the barrier.
@@ -43,20 +51,32 @@ One taught state, labelled with the phase of its nearest master sample. The targ
 _Avoid_: sample, demo point
 
 **Phase**:
-How far along the master the task has come, from 0 at its start to 1 at its end.
+How far along the master the task has come, from 0 at its start to 1 at its end. It is estimated from the peg's pose alone, so in a world that deviates from the taught one it can be wrong: a pose can look like a later stage although an earlier one never succeeded.
 _Avoid_: progress, stage index
 
 **Front**:
-The phase up to which the expanding target holds datapoints: the current phase plus one resolvable width.
+The phase up to which the sliding target holds datapoints: the current phase plus one resolvable width.
 
 ## Method
+
+**Sensorless**:
+Knowing only the robot's joint angles, and so the peg's pose: no force, contact or vision sensing. Everything the method knows about the world, including the phase, comes from these.
 
 **Target**:
 The distribution the law tries to match, as coefficients.
 _Avoid_: reference distribution, goal distribution
 
-**Expanding target**:
-A target holding only the datapoints up to the front, so it grows as the phase rises and shrinks if it falls.
+**Sliding target**:
+A target holding only the datapoints within one resolvable width of the phase, behind it and ahead, so it moves along the master as the phase rises or falls.
+
+**Advance**:
+The phase rising one resolvable width above the lowest phase it has reached since the last advance.
+
+**Stall**:
+The time since the last advance.
+
+**Retry**:
+The sliding target's back edge retreating during a stall, one stage per forgetting horizon, so that earlier stages return to the target.
 
 **Statistic**:
 The record of where the robot has been, as coefficients.
