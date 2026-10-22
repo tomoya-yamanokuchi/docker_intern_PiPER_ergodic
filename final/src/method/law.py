@@ -201,7 +201,9 @@ class Law:
             self.lowest, self.stall = phi, 0
         else:
             self.stall += 1
-        self.rho = rho = self.delta * self.stall * self.dt / self.T_f if self.retry else 0.0
+        # The back edge retreats as fast as the arm can follow it back along the master.
+        retreat = MAX_SPEED / self.task.S_m  # phase per s
+        self.rho = rho = retreat * self.stall * self.dt if self.retry else 0.0
         hi = self.task.lo + self.task.L
         inset = MAX_SPEED * self.dt
         y_measured, y = y, np.clip(y, self.task.lo + inset, hi - inset)
