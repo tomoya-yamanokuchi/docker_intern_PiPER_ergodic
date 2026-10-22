@@ -17,7 +17,7 @@ MAX_SPEED / ERGODIC_FREQ_HZ away plus whatever the arm left of the last step, an
 commanded pose walks from the measured pose to it at CONTROL_FREQ_HZ. Starting each walk
 at the measured pose, not where the last one ended, keeps the commanded velocity the
 law's own, so the friction feedforward always has the law's direction, even when the arm
-lags. A lead grows only as far as the torque guard allows (max_lead).
+lags. A lead grows only until the spring pushes with MAX_FORCE.
 
 Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry|recall> task_<ts>.npz [n_trials]
 """
@@ -33,14 +33,13 @@ import numpy as np
 from arm.control import (
     CONTROL_FREQ_HZ,
     ERGODIC_FREQ_HZ,
-    R_WORLD_BASE,
     Impedance,
     drain_stdin,
     gravity_compensation,
     keep_rate,
     read_command,
 )
-from arm.piper import connect_arm, hold_current_pose, torque_limit
+from arm.piper import connect_arm, hold_current_pose
 from core.agx_pinocchio import AgxPinocchio
 from method.law import METHODS, Law
 from method.pose import MAX_SPEED, ROTATION_LENGTH, to_metric, to_pose
@@ -49,6 +48,7 @@ from method.task import Task
 from robot import OUTPUT_DIR, TCP_FRAME, URDF_PATH
 from visualization.views import RunView
 
+MAX_FORCE = 5.0  # N, the most the spring may push the key with
 PASSES = 20  # a trial's time limit, in passes along the master at full speed
 CYCLES = round(CONTROL_FREQ_HZ / ERGODIC_FREQ_HZ)  # control cycles per law step
 PRINT_EVERY = 10  # law steps between progress lines
@@ -94,46 +94,20 @@ def plan(y: np.ndarray, y_next: np.ndarray, lead: float) -> tuple[np.ndarray, np
     return min(1.0, lead / length) * delta / CYCLES, twist
 
 
-def max_lead(impedance: Impedance, q: np.ndarray, y: np.ndarray, R0: np.ndarray, limit) -> float:
-    """The longest lead (m) whose spring torque, in any direction of the metric, keeps every
-    joint inside the torque guard's limit beside gravity and the static friction feedforward.
-
-    The spring's torque per metre along each axis is probed through the controller itself,
-    so its gains, weights and frame are the ones that will act.
-    """
-
-    def torque(dy: np.ndarray) -> np.ndarray:
-        p, rot = to_pose(y + dy, R0)
-        return impedance.controller.compute_cartesian_torque(
-            desired_pos=p,
-            desired_ori=rot,
-            q_cur=q,
-            v_cur=np.zeros(6),
-            base_orientation=R_WORLD_BASE,
-        )
-
-    probe = 1e-3  # m, small enough for the spring to be linear in it
-    at_rest = torque(np.zeros(6))
-    per_metre = np.column_stack([torque(probe * e) - at_rest for e in np.eye(6)]) / probe
-    ff = impedance.feed_forward
-    gravity = ff.gravity_scale * ff.pin_model.inverse_dynamics(q, np.zeros(6), np.zeros(6))
-    margin = limit - np.abs(gravity) - ff.f_static
-    return float(np.min(margin / np.linalg.norm(per_metre, axis=1)))
-
-
 def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
     """One trial from wherever the arm stands: 'success', 'abort' or 'limit'."""
     law, impedance, view, pin, task = setup
     law.new_trial()
     view.new_trial()
-    time_limit, limit = PASSES * task.S_m / MAX_SPEED, torque_limit(robot)
+    time_limit = PASSES * task.S_m / MAX_SPEED
+    max_lead = MAX_FORCE / impedance.controller.Kc[:3].max()  # m
     t0, cycle, tau = time.monotonic(), 0, np.zeros(6)
     while True:
         start = time.monotonic()
         q = np.array(robot.get_joint_angles().msg)
         if cycle % CYCLES == 0:
             y_cmd = measured_state(pin, task, q)
-            y_next, info = law.step(y_cmd, max_lead(impedance, q, y_cmd, task.R0, limit))
+            y_next, info = law.step(y_cmd, max_lead)
             step, twist = plan(y_cmd, y_next, info.lead)
             view.update(q, y_next, info.phi, info.w)
             for key, value in zip(
