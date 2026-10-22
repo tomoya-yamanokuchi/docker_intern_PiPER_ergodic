@@ -36,7 +36,9 @@ tree holding only `agx_reference/`).
 3. **`workspace/src/agx_reference/` is third-party code that stays close to
    upstream** (§4). Do not reformat it, restyle its Chinese comments, or "fix"
    its bare `except:` clauses. New work goes beside it, importing from it.
-4. **Only `workspace/src/` is live code.** `double_PiPER/` is the vendor's ROS1
+4. **Only `workspace/src/` and `final/src/` are live code.** `final/` is the IROS
+   implementation, a separate tree; read `final/CLAUDE.md` before working in it.
+   `double_PiPER/` is the vendor's ROS1
    package tree, kept as reference only. No ROS is used anywhere. Do not add to,
    build or "fix" it.
 
