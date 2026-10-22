@@ -119,3 +119,7 @@ _Avoid_: session, series
 
 **Success**:
 A trial that reaches the goal within the step limit. A trial that ends in a slip-out or a dead end is a failure.
+
+**Unassisted success**:
+A success in which the operator never touches the arm during the trial. A trial the operator helped home, such as by wiggling the key the last centimetre in, is assisted, whatever it ended in.
+_Avoid_: good run, clean run

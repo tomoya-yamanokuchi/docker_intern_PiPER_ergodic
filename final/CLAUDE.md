@@ -17,6 +17,8 @@ A tree of its own: `final/src` never imports `workspace/src`, and runs only thro
 - **Scripts**, in pipeline order: `record_master.py` (ARM), `teach_exploration.py` (ARM),
   `label.py`, `run_trials.py` (ARM), `view_master.py` / `view_labels.py` / `view_run.py`.
   `simulate.py` runs the whole chain on the fake arm. Each docstring gives its usage.
+- **Kept data**: `saved_recordings/door/` holds the master, exploration and task of the
+  first unassisted success (tag `door-working-v1`); `final/output/` is gitignored.
 - **Offline analysis of an arm run**: `final/output/run_<method>_<ts>.npz`. Read it with the
   hardware-free modules: `robot.measured_state` turns a logged `q` into the law's state.
 
