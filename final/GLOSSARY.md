@@ -67,6 +67,14 @@ Giving every datapoint the phase of its nearest master sample. It needs only the
 How far along the master the task has come, from 0 at its start to 1 at its end. It is estimated from the tool's pose alone, so in a world that deviates from the taught one it can be wrong: a pose can look like a later stage although an earlier one never succeeded.
 _Avoid_: progress, stage index
 
+**False progress**:
+The phase rising although an earlier stage has not succeeded, such as a key turned beside the lock: it is free to turn, and the turn has no effect.
+_Avoid_: fake progress, wrong phase
+
+**Tube**:
+The region around the master in which a pose is credible for its phase: narrow where the taught datapoints are, such as in the lock. Outside it the phase does not move.
+_Avoid_: canal, envelope, corridor
+
 **Front**:
 The phase up to which the sliding target holds datapoints: the current phase plus two resolvable widths.
 

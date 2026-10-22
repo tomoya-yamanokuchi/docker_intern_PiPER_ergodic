@@ -4,6 +4,9 @@ The 2-D notebook's law, written for any dimension and run online. Each step take
 tool's measured state y in the pose metric and returns the next commanded state, one
 MAX_SPEED * dt away. The phase comes from that same y: the method is sensorless.
 
+The phase holds while the measured pose is outside the tube, so a key turned beside the
+lock cannot read as progress (false progress); the notebook's filter has no tube.
+
 Three things differ from the notebook, for speed and accuracy in six dimensions:
 - The gradient is contracted against Lambda times each basis gradient, a TT of
   Lambda's own rank, rather than forming Lambda * (W - W_hat). The target part then
@@ -18,6 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 import tt
 from scipy.special import logsumexp
+from scipy.stats import chi2
 from tt.cross import rect_cross
 
 from method.pose import MAX_SPEED
@@ -29,6 +33,9 @@ METHODS = {  # name -> (sliding, forgetting, retry)
     "retry": (True, True, True),
 }
 FLUSH = 5  # the statistic is rounded every this many steps
+# The offset from the taught environment that must still read as progress (map #1, False
+# progress): the tube's floor puts it on the gate.
+TOLERANCE = 0.005  # m
 
 
 def basis(y: np.ndarray, lo: np.ndarray, L: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -99,16 +106,47 @@ class Statistic:
         return self.ttA * (1 / self.Z)
 
 
-class PhaseFilter:
-    """The posterior mean phase, from a Bayesian filter along the master on the state alone."""
+def tube(task: Task, delta: float) -> np.ndarray:  # (N_M + 1, d, d), 1/m^2
+    """The tube's precision at each master sample: the second moment about the sample of the
+    datapoints labelled within delta of its phase, plus a floor that puts TOLERANCE on the
+    gate, so a window of near-identical datapoints still admits that offset."""
+    d = task.master.shape[1]
+    floor = TOLERANCE**2 / chi2.ppf(0.99, d) * np.eye(d)
+    precision = np.empty((len(task.master), d, d))
+    for i, (m_i, phi_i) in enumerate(zip(task.master, task.phi_master, strict=True)):
+        e = task.datapoints[np.abs(task.phi_p - phi_i) <= delta] - m_i
+        precision[i] = np.linalg.inv(e.T @ e / max(len(e), 1) + floor)
+    return precision
 
-    def __init__(self, master: np.ndarray, s: np.ndarray, h: float):
+
+class PhaseFilter:
+    """The posterior mean phase, from a Bayesian filter along the master on the state alone.
+
+    With a tube, a state outside it leaves the belief and the phase where they were: inside
+    means within the 99 % quantile of chi-square in d dimensions of some master sample. Only
+    the first state is taken wherever it lies, as there is no belief yet to hold.
+    """
+
+    def __init__(
+        self,
+        master: np.ndarray,  # (N_M + 1, d) m
+        s: np.ndarray,  # (N_M + 1,) m
+        h: float,  # m
+        precision: np.ndarray | None = None,  # (N_M + 1, d, d) 1/m^2, the tube's
+    ):
         self.master, self.h, self.phi_master = master, h, s / s[-1]
+        self.precision, self.gate = precision, chi2.ppf(0.99, master.shape[1])
         self.arc2 = (s[:, None] - s[None]) ** 2
         self.min_sigma = s[-1] / N_M
-        self.log_belief, self.y_prev = None, None
+        self.log_belief, self.y_prev, self.phi = None, None, None
+
+    def inside(self, y: np.ndarray) -> bool:
+        e = y - self.master
+        return bool(np.einsum("ni,nij,nj->n", e, self.precision, e).min() <= self.gate)
 
     def update(self, y: np.ndarray) -> float:
+        if self.log_belief is not None and self.precision is not None and not self.inside(y):
+            return self.phi
         log_lik = -((self.master - y) ** 2).sum(axis=1) / (2 * self.h**2)
         if self.log_belief is None:
             log_belief = log_lik
@@ -119,7 +157,8 @@ class PhaseFilter:
             )
         self.log_belief = log_belief - logsumexp(log_belief)
         self.y_prev = y
-        return float(np.exp(self.log_belief) @ self.phi_master)
+        self.phi = float(np.exp(self.log_belief) @ self.phi_master)
+        return self.phi
 
 
 @dataclass
@@ -144,13 +183,14 @@ class Law:
         self.lam = np.exp(-dt / self.T_f) if forgetting else 1.0
         self.uniform = np.full(len(task.datapoints), 1 / len(task.datapoints))
         self.rmax = d * (int(max(tt_weighted_sum(self.C, self.uniform).round(1e-1).r)) + 2)
+        self.tube = tube(task, self.delta)
         self.stat = None
 
     def new_trial(self) -> None:
         """A fresh phase and stall; a fresh statistic unless it is E2T2's, which is handed on."""
         if self.stat is None or self.lam < 1.0:
             self.stat = Statistic(self.lam, self.dt, 1e-4, self.rmax)
-        self.filter = PhaseFilter(self.task.master, self.task.s, self.task.h)
+        self.filter = PhaseFilter(self.task.master, self.task.s, self.task.h, self.tube)
         self.lowest, self.stall = np.inf, 0
         self.last = None  # the last step: measured state, and the step commanded from it
 

@@ -37,6 +37,8 @@ Deliberate, so a result from one does not carry over unchecked:
 - **Retry's retreat rate**: the notebook retreats `delta / T_f` phase per second
   (GLOSSARY "Retry" describes this); `law.py` retreats `MAX_SPEED / S_m`, the arm's own
   speed along the master.
+- **The tube**: `law.py`'s phase holds while the pose is outside it (GLOSSARY "Tube");
+  the notebook's filter has none, and `test_against_notebook` compares the filter without it.
 - **The lead and the cube clamp** exist only in `law.py` (the arm lags; the notebook's
   world does not).
 - **6-D numerics** (gradient contraction, Lambda unrounded, statistic rounding): the
