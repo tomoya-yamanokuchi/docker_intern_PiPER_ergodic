@@ -27,6 +27,7 @@ METHODS = {  # name -> (sliding, forgetting, retry)
     "e2t2": (False, False, False),
     "sliding": (True, True, False),
     "retry": (True, True, True),
+    "recall": (True, True, False),  # the weights are method.recall's, the rest is sliding's
 }
 FLUSH = 5  # the statistic is rounded every this many steps
 
@@ -128,6 +129,7 @@ class StepInfo:
     stall: float  # s since the last advance
     rho: float  # the back edge's retreat, in phase
     w: np.ndarray  # (N_P,) the target's weights
+    lead: float  # m, how far the next state is from the measured one
 
 
 class Law:
@@ -151,6 +153,30 @@ class Law:
             self.stat = Statistic(self.lam, self.dt, 1e-4, self.rmax)
         self.filter = PhaseFilter(self.task.master, self.task.s, self.task.h)
         self.lowest, self.stall = np.inf, 0
+        self.last = None  # the last step: measured state, and the step commanded from it
+
+    def lead(self, y: np.ndarray, max_lead: float) -> float:
+        """This step's length: one step at MAX_SPEED, plus what the arm left of the last.
+
+        The part of the last step the arm did not cover along its direction is carried
+        over, so a lead grows while the arm stands and its spring with it, and falls back
+        to one step once the arm catches up. max_lead is the caller's bound, the law has
+        no notion of force.
+        """
+        nominal = MAX_SPEED * self.dt
+        if self.last is None:
+            return nominal
+        y_last, step = self.last
+        length = np.linalg.norm(step)
+        covered = (y - y_last) @ step / max(length, 1e-12)
+        return float(np.clip(nominal + length - covered, nominal, max(nominal, max_lead)))
+
+    def weights(self, phi: float) -> np.ndarray:  # (N_P,) of sum 1
+        return (
+            sliding_weights(phi, self.task.phi_p, self.delta, self.rho)
+            if self.sliding
+            else self.uniform
+        )
 
     def gradient(self, phi_rows: np.ndarray, dphi_rows: np.ndarray, w: np.ndarray) -> np.ndarray:
         """(d,): the gradient of the ergodic metric's Lambda-weighted error at the state."""
@@ -161,11 +187,13 @@ class Law:
             b[i] = tt.dot(W, tt.vector.from_list(cores)) - w @ dot_rows(cores, self.C)
         return b
 
-    def step(self, y: np.ndarray) -> tuple[np.ndarray, StepInfo]:
-        """The next commanded state from the measured one, (d,) m each.
+    def step(self, y: np.ndarray, max_lead: float = np.inf) -> tuple[np.ndarray, StepInfo]:
+        """The next commanded state from the measured one, (d,) m each, at most max_lead away.
 
         The phase reads y as measured; the law steps from y clamped into its cube, the only
-        place its basis describes, so a start outside the cube is walked into it.
+        place its basis describes, so a start outside the cube is walked into it. The clamp
+        stays one step inside each face: on a face every cosine's slope across it is zero,
+        so a state held there would get no push back in.
         """
         phi = self.filter.update(y)
         self.lowest = min(self.lowest, phi)
@@ -173,12 +201,17 @@ class Law:
             self.lowest, self.stall = phi, 0
         else:
             self.stall += 1
-        rho = self.delta * self.stall * self.dt / self.T_f if self.retry else 0.0
+        self.rho = rho = self.delta * self.stall * self.dt / self.T_f if self.retry else 0.0
         hi = self.task.lo + self.task.L
-        y = np.clip(y, self.task.lo, hi)
+        inset = MAX_SPEED * self.dt
+        y_measured, y = y, np.clip(y, self.task.lo + inset, hi - inset)
         phi_rows, dphi_rows = basis(y, self.task.lo, self.task.L)
         self.stat.add(phi_rows)
-        w = sliding_weights(phi, self.task.phi_p, self.delta, rho) if self.sliding else self.uniform
+        w = self.weights(phi)
         b = self.gradient(phi_rows, dphi_rows, w)
-        y_next = np.clip(y - MAX_SPEED * self.dt * b / np.linalg.norm(b), self.task.lo, hi)
-        return y_next, StepInfo(phi, self.stall * self.dt, rho, w)
+        lead = self.lead(y_measured, max_lead)
+        y_next = np.clip(y - lead * b / np.linalg.norm(b), self.task.lo, hi)
+        # As run_trials walks it: from the measured state, at most the lead long.
+        step = y_next - y_measured
+        self.last = y_measured, step * min(1.0, lead / max(np.linalg.norm(step), 1e-12))
+        return y_next, StepInfo(phi, self.stall * self.dt, rho, w, lead)

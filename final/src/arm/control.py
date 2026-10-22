@@ -12,7 +12,7 @@ from functools import partial
 
 import numpy as np
 
-from arm.piper import apply_joint_torques, read_joint_velocities
+from arm.piper import apply_joint_torques, read_joint_velocities, torque_limit
 from controller.feed_forward import FeedForward
 from controller.task_imp_controller import CartesianImpedanceController
 from core.agx_pinocchio import AgxPinocchio
@@ -35,6 +35,13 @@ def make_controller() -> CartesianImpedanceController:
     return controller
 
 
+def fit_to_limit(fixed: np.ndarray, spring: np.ndarray, limit: np.ndarray) -> float:
+    """The largest s in [0, 1] with |fixed + s * spring| <= limit on every joint (0 if fixed
+    alone is over, which apply_joint_torques then refuses)."""
+    room = limit - np.sign(spring) * fixed
+    return float(np.clip(np.min(room / np.maximum(np.abs(spring), 1e-12)), 0.0, 1.0))
+
+
 @dataclass
 class Impedance:
     """The Cartesian impedance law with the gains validated on the arm, plus friction feedforward."""
@@ -54,7 +61,10 @@ class Impedance:
         """The torque towards the commanded pose.
 
         The feedforward takes only the direction of the desired joint velocity, so a
-        pseudo-inverse near a singularity cannot make it large.
+        pseudo-inverse near a singularity cannot make it large. If the total would pass the
+        torque limit, the spring and damper part is scaled down until it fits, gravity and
+        the feedforward untouched: a clamp would cut a joint's damping, a scaled spring keeps
+        its ratio to it.
         """
         qd = read_joint_velocities(robot)
         tau = self.controller.compute_cartesian_torque(
@@ -65,9 +75,11 @@ class Impedance:
             base_orientation=R_WORLD_BASE,
         )
         qd_des = np.linalg.pinv(self.controller.pin_model.jacobian(q, TCP_FRAME)) @ twist
-        tau = tau + self.feed_forward.compute_torque(
-            q_cur=q, qd_cur=qd, qd_des=qd_des, qdd_des=np.zeros(6)
-        )
+        fixed = self.controller.pin_model.nonlinear_effects(
+            q, qd, R_WORLD_BASE
+        ) + self.feed_forward.compute_torque(q_cur=q, qd_cur=qd, qd_des=qd_des, qdd_des=np.zeros(6))
+        spring = tau - self.controller.pin_model.nonlinear_effects(q, qd, R_WORLD_BASE)
+        tau = fixed + fit_to_limit(fixed, spring, torque_limit(robot)) * spring
         apply_joint_torques(robot, tau)
         return tau
 

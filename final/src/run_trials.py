@@ -3,7 +3,7 @@
 
 TOUCHES THE ARM. Methods: e2t2 (static target, its statistic handed on across trials, as
 its paper does), sliding (sliding target with forgetting, fresh each trial) and retry
-(sliding with the retry). Before every trial the arm is backdrivable: re-lock the door,
+(sliding with the retry) and recall (sliding whose target keeps the whole past, method/recall.py). Before every trial the arm is backdrivable: re-lock the door,
 take the key out, put the arm near the master's start (the distance is printed) and press
 Enter. The law is not stepped meanwhile, so the handling never enters the statistic.
 
@@ -13,12 +13,13 @@ to run_<method>_<timestamp>.npz in final/output; view one with view_run.py.
 
 Control is fully online, as closed-loop ergodic control is meant to be: every
 ERGODIC_FREQ_HZ the measured pose goes into the law and its next state comes out,
-MAX_SPEED / ERGODIC_FREQ_HZ away, and the commanded pose walks from the measured pose to
-it at CONTROL_FREQ_HZ. Starting each walk at the measured pose, not where the last one
-ended, keeps the commanded velocity the law's own, so the friction feedforward always has
-the law's direction, even when the arm lags.
+MAX_SPEED / ERGODIC_FREQ_HZ away plus whatever the arm left of the last step, and the
+commanded pose walks from the measured pose to it at CONTROL_FREQ_HZ. Starting each walk
+at the measured pose, not where the last one ended, keeps the commanded velocity the
+law's own, so the friction feedforward always has the law's direction, even when the arm
+lags. A lead grows only as far as the torque guard allows (max_lead).
 
-Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry> task_<ts>.npz [n_trials]
+Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry|recall> task_<ts>.npz [n_trials]
 """
 
 import sys
@@ -32,16 +33,18 @@ import numpy as np
 from arm.control import (
     CONTROL_FREQ_HZ,
     ERGODIC_FREQ_HZ,
+    R_WORLD_BASE,
     Impedance,
     drain_stdin,
     gravity_compensation,
     keep_rate,
     read_command,
 )
-from arm.piper import connect_arm, hold_current_pose
+from arm.piper import connect_arm, hold_current_pose, torque_limit
 from core.agx_pinocchio import AgxPinocchio
 from method.law import METHODS, Law
 from method.pose import MAX_SPEED, ROTATION_LENGTH, to_metric, to_pose
+from method.recall import RecallLaw
 from method.task import Task
 from robot import OUTPUT_DIR, TCP_FRAME, URDF_PATH
 from visualization.views import RunView
@@ -74,18 +77,48 @@ def place_arm(robot, pin: AgxPinocchio, task: Task, trial: int) -> None:
         keep_rate(start)
 
 
-def plan(y: np.ndarray, y_next: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def plan(y: np.ndarray, y_next: np.ndarray, lead: float) -> tuple[np.ndarray, np.ndarray]:
     """The commanded state's step per cycle from the measured y towards y_next, and its
     twist (m/s, rad/s).
 
-    Capped at MAX_SPEED in the metric, so the command never leads the arm by more than one
-    law step, even when the arm stands outside the cube and y_next is clamped into it.
+    Capped at the law's lead, so the command never leads the arm by more than that, even
+    when the arm stands outside the cube and y_next is clamped into it. The twist, which
+    only the friction feedforward reads, is the law's velocity, at most MAX_SPEED: a lead
+    beyond one step is the arm lagging, and it acts through the spring alone.
     """
     dt = 1.0 / ERGODIC_FREQ_HZ
     delta = y_next - y
-    scale = min(1.0, MAX_SPEED * dt / max(np.linalg.norm(delta), 1e-12))
-    twist = scale * np.concatenate([delta[:3], delta[3:] / ROTATION_LENGTH]) / dt
-    return scale * delta / CYCLES, twist
+    length = max(np.linalg.norm(delta), 1e-12)
+    velocity = min(1.0, MAX_SPEED * dt / length) * delta / dt
+    twist = np.concatenate([velocity[:3], velocity[3:] / ROTATION_LENGTH])
+    return min(1.0, lead / length) * delta / CYCLES, twist
+
+
+def max_lead(impedance: Impedance, q: np.ndarray, y: np.ndarray, R0: np.ndarray, limit) -> float:
+    """The longest lead (m) whose spring torque, in any direction of the metric, keeps every
+    joint inside the torque guard's limit beside gravity and the static friction feedforward.
+
+    The spring's torque per metre along each axis is probed through the controller itself,
+    so its gains, weights and frame are the ones that will act.
+    """
+
+    def torque(dy: np.ndarray) -> np.ndarray:
+        p, rot = to_pose(y + dy, R0)
+        return impedance.controller.compute_cartesian_torque(
+            desired_pos=p,
+            desired_ori=rot,
+            q_cur=q,
+            v_cur=np.zeros(6),
+            base_orientation=R_WORLD_BASE,
+        )
+
+    probe = 1e-3  # m, small enough for the spring to be linear in it
+    at_rest = torque(np.zeros(6))
+    per_metre = np.column_stack([torque(probe * e) - at_rest for e in np.eye(6)]) / probe
+    ff = impedance.feed_forward
+    gravity = ff.gravity_scale * ff.pin_model.inverse_dynamics(q, np.zeros(6), np.zeros(6))
+    margin = limit - np.abs(gravity) - ff.f_static
+    return float(np.min(margin / np.linalg.norm(per_metre, axis=1)))
 
 
 def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
@@ -93,30 +126,44 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
     law, impedance, view, pin, task = setup
     law.new_trial()
     view.new_trial()
-    limit = PASSES * task.S_m / MAX_SPEED
-    t0, cycle = time.monotonic(), 0
+    time_limit, limit = PASSES * task.S_m / MAX_SPEED, torque_limit(robot)
+    t0, cycle, tau = time.monotonic(), 0, np.zeros(6)
     while True:
         start = time.monotonic()
         q = np.array(robot.get_joint_angles().msg)
         if cycle % CYCLES == 0:
             y_cmd = measured_state(pin, task, q)
-            y_next, info = law.step(y_cmd)
-            step, twist = plan(y_cmd, y_next)
+            y_next, info = law.step(y_cmd, max_lead(impedance, q, y_cmd, task.R0, limit))
+            step, twist = plan(y_cmd, y_next, info.lead)
             view.update(q, y_next, info.phi, info.w)
             for key, value in zip(
-                ("trial", "t", "q", "y_cmd", "phi", "stall", "rho", "w"),
-                (trial, start - t0, q, y_next, info.phi, info.stall, info.rho, info.w),
+                ("trial", "t", "q", "y_cmd", "phi", "stall", "rho", "w", "lead", "tau"),
+                (
+                    trial,
+                    start - t0,
+                    q,
+                    y_next,
+                    info.phi,
+                    info.stall,
+                    info.rho,
+                    info.w,
+                    info.lead,
+                    tau,
+                ),
                 strict=True,
             ):
                 log[key].append(value)
             if cycle % (CYCLES * PRINT_EVERY) == 0:
-                print(f"  t {start - t0:5.1f} s  phase {info.phi:.2f}  stall {info.stall:4.1f} s")
+                print(
+                    f"  t {start - t0:5.1f} s  phase {info.phi:.2f}  stall {info.stall:4.1f} s"
+                    f"  lead {info.lead * 1e3:.1f} mm"
+                )
         y_cmd = y_cmd + step
-        impedance.send(robot, q, to_pose(y_cmd, task.R0), twist)
+        tau = impedance.send(robot, q, to_pose(y_cmd, task.R0), twist)
         command = read_command()
         if command in ("", "a"):
             return "success" if command == "" else "abort"
-        if start - t0 > limit:
+        if start - t0 > time_limit:
             return "limit"
         cycle += 1
         keep_rate(start)
@@ -140,7 +187,7 @@ def prepare(method: str, task_path: Path) -> tuple:
     """Everything slow, built before the arm is connected: the law, the controller, the view."""
     task = Task.load(task_path)
     return (
-        Law(task, method, 1.0 / ERGODIC_FREQ_HZ),
+        (RecallLaw if method == "recall" else Law)(task, method, 1.0 / ERGODIC_FREQ_HZ),
         Impedance(),
         RunView(task),
         AgxPinocchio(str(URDF_PATH)),
@@ -156,7 +203,9 @@ def main(
     try:
         for trial in range(n_trials):
             place_arm(robot, pin, task, trial)
-            print(f"trial {trial + 1} of {n_trials}, {method}: Enter on success, a to abort")
+            print(
+                f"trial {trial + 1} of {n_trials}, {method}: Enter on success, a then Enter to abort"
+            )
             outcomes.append(run_trial(robot, setup, trial, log))
             print(f"trial {trial + 1}: {outcomes[-1]} after {log['t'][-1]:.1f} s")
     except KeyboardInterrupt:

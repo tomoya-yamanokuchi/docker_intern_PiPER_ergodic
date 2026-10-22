@@ -18,7 +18,7 @@ feedforward is set as it would be identified on such an arm: no friction term an
 gravity correction (the one measured on the real arm's joint 2). run_trials.py is the
 same as on the arm.
 
-Run from final/src:  sh run.sh simulate.py [e2t2|sliding|retry] [n_trials]
+Run from final/src:  sh run.sh simulate.py [e2t2|sliding|retry|recall] [n_trials]
 """
 
 import sys
@@ -136,7 +136,7 @@ def main(method: str, n_trials: int) -> None:
     robot = FakePiper(q_teach[0], path=q_teach, max_cycles=len(q_teach))
     # The q a cycle reads is the path's sample before the cycle's torque advances it.
     teach_exploration.read_command = lambda: "" if robot.cycles - 1 in confirm else None
-    exploration = teach_exploration.main(robot, TeachingView(), None, OUT)
+    exploration = teach_exploration.main(robot, TeachingView(np.load(master)["q"]), None, OUT)
 
     task_path = label.main(master, exploration, OUT)
     setup = run_trials.prepare(method, task_path)
