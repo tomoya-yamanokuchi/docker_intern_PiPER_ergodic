@@ -42,21 +42,16 @@ from arm.control import (
 from arm.piper import connect_arm, hold_current_pose
 from core.agx_pinocchio import AgxPinocchio
 from method.law import METHODS, Law
-from method.pose import MAX_SPEED, ROTATION_LENGTH, to_metric, to_pose
+from method.pose import MAX_SPEED, ROTATION_LENGTH, to_pose
 from method.recall import RecallLaw
 from method.task import Task
-from robot import OUTPUT_DIR, TCP_FRAME, URDF_PATH
+from robot import OUTPUT_DIR, URDF_PATH, measured_state
 from visualization.views import RunView
 
 MAX_FORCE = 5.0  # N, the most the spring may push the key with
 PASSES = 20  # a trial's time limit, in passes along the master at full speed
 CYCLES = round(CONTROL_FREQ_HZ / ERGODIC_FREQ_HZ)  # control cycles per law step
 PRINT_EVERY = 10  # law steps between progress lines
-
-
-def measured_state(pin: AgxPinocchio, task: Task, q: np.ndarray) -> np.ndarray:  # (6,) m
-    p, rot = pin.forward_kinematics(q, TCP_FRAME)
-    return to_metric(p[None], rot[None], task.R0)[0]
 
 
 def place_arm(robot, pin: AgxPinocchio, task: Task, trial: int) -> None:

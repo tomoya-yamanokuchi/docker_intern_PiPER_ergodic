@@ -6,6 +6,8 @@ import numpy as np
 
 import core.agx_pinocchio
 from core.agx_pinocchio import AgxPinocchio
+from method.pose import to_metric
+from method.task import Task
 
 SRC = Path(__file__).resolve().parent
 URDF_PATH = SRC / "agx_reference/piper/piper/urdf/piper_description.urdf"
@@ -24,3 +26,8 @@ def tool_poses(pin: AgxPinocchio, q: np.ndarray) -> tuple[np.ndarray, np.ndarray
     """(n, 6) rad -> the tool's positions (n, 3) m and orientations (n, 3, 3)."""
     poses = [pin.forward_kinematics(q_i, TCP_FRAME) for q_i in q]
     return np.array([p for p, _ in poses]), np.array([r for _, r in poses])
+
+
+def measured_state(pin: AgxPinocchio, task: Task, q: np.ndarray) -> np.ndarray:  # (6,) m
+    p, rot = pin.forward_kinematics(q, TCP_FRAME)
+    return to_metric(p[None], rot[None], task.R0)[0]
