@@ -24,7 +24,7 @@ from scipy.spatial.transform import Rotation as R
 from core.agx_pinocchio import AgxPinocchio
 from method.law import sliding_weights
 from method.pose import ROTATION_LENGTH, to_metric
-from method.task import Task, cube, kernel_width
+from method.task import Task, cube, kernel_width, phase_label, resample, trim_dwell
 from robot import TCP_FRAME, URDF_PATH, tool_poses
 from visualization.scene import (
     colors_of,
@@ -44,6 +44,8 @@ KDE_POINTS = 3000  # draws from the teaching view's kernel density
 TRAIL_EVERY = 4  # a live run's trail keeps every this-many-th update
 IDLE = 0.01  # s, a drawing thread's poll while nothing is pending
 RUN_FRAME = 0.25  # s between a finished run's frames
+MASTER_FRAMES = 21  # key frames drawn along the master while teaching
+GUIDE_AHEAD = 0.1  # phase the second guide key leads by, so a turn shows before it is due
 
 
 def datapoint_rotations(task: Task) -> np.ndarray:  # (N_P, 3, 3)
@@ -129,12 +131,34 @@ def show_labels(task: Task) -> None:
 
 class TeachingView:
     """The arm as it is backdriven, every datapoint as a tool frame, and the kernel density
-    refitted on each change: draws from it, coloured from the datapoints' own range."""
+    refitted on each change: draws from it, coloured from the datapoints' own range.
 
-    def __init__(self):
+    The master is drawn too, its path and key frames coloured by phase; a fan of x stubs at
+    one place is the turn. Two guide keys follow the arm: orange is the master's pose at the
+    arm's phase (its nearest master sample, as label.py will label it), green the master's
+    pose GUIDE_AHEAD further on.
+    """
+
+    def __init__(self, q_master: np.ndarray):
         self.pin = AgxPinocchio(str(URDF_PATH))
         self.viewer = open_viewer()
-        self.arm = show_arm(self.viewer, self.pin, np.zeros(6))
+        p, rot = tool_poses(self.pin, q_master)
+        self.R0 = rot[0]
+        y = to_metric(p, rot, self.R0)
+        keep = trim_dwell(y)
+        self.master, self.q_master, s = resample(y[keep], q_master[keep])
+        self.phi = s / s[-1]
+        draw_master(self.viewer, self.master[:, :3], self.phi)
+        pick = np.linspace(0, len(self.phi) - 1, MASTER_FRAMES).round().astype(int)
+        draw_frames(self.viewer["master_frames"], *tool_poses(self.pin, self.q_master[pick]),
+                    colors_of(self.phi[pick]))  # fmt: skip
+        for name, color in (("here", [1.0, 0.5, 0.0]), ("ahead", [0.0, 0.8, 0.3])):
+            draw_frames(
+                self.viewer[f"guide/{name}"], np.zeros((1, 3)), np.eye(3)[None], np.array([color])
+            )
+        draw_phase_bar(self.viewer["phase_bar"])
+        place(self.viewer["phase_bar"], self.master[0, :3] + [0.0, 0.0, 0.08])
+        self.arm = show_arm(self.viewer, self.pin, self.q_master[0])
         _draw_tool(self.viewer)
         self.q, self.points = None, None
         threading.Thread(target=self._draw, daemon=True).start()
@@ -152,10 +176,25 @@ class TeachingView:
             if points is not None:
                 self._draw_datapoints(np.array(points).reshape(-1, 6))
             if q is not None:
-                self.arm.display(q)
-                self.viewer["tool"].set_transform(_tool_transform(self.pin, q))
+                self._draw_arm(q)
             if q is None and points is None:
                 time.sleep(IDLE)
+
+    def _phase(self, q: np.ndarray) -> float:
+        p, rot = self.pin.forward_kinematics(q, TCP_FRAME)
+        return float(phase_label(to_metric(p[None], rot[None], self.R0), self.master, self.phi)[0])
+
+    def _master_at(self, phi: float) -> int:
+        return int(np.searchsorted(self.phi, min(phi, 1.0)).clip(0, len(self.phi) - 1))
+
+    def _draw_arm(self, q: np.ndarray) -> None:
+        self.arm.display(q)
+        self.viewer["tool"].set_transform(_tool_transform(self.pin, q))
+        phi = self._phase(q)
+        for name, at in (("here", phi), ("ahead", phi + GUIDE_AHEAD)):
+            T = _tool_transform(self.pin, self.q_master[self._master_at(at)])
+            self.viewer[f"guide/{name}"].set_transform(T)
+        set_phase_bar(self.viewer["phase_bar"], phi)
 
     def _draw_datapoints(self, q: np.ndarray) -> None:
         self.viewer["teaching"].delete()
@@ -163,6 +202,15 @@ class TeachingView:
             return
         p, rot = tool_poses(self.pin, q)
         draw_frames(self.viewer["teaching/frames"], p, rot, np.tile([0.0, 0.0, 0.0], (len(p), 1)))
+        phi = self._phase(q[-1])
+        turn = np.degrees(
+            np.linalg.norm(to_metric(p[-1:], rot[-1:], self.R0)[0, 3:]) / ROTATION_LENGTH
+        )
+        master_turn = np.degrees(
+            np.linalg.norm(self.master[self._master_at(phi), 3:]) / ROTATION_LENGTH
+        )
+        print(f"  newest at phase {phi:.2f}: rotated {turn:.0f} deg from the master's start, "
+              f"the master {master_turn:.0f} deg there")  # fmt: skip
         if len(q) < 3:
             return
         y = to_metric(p, rot, rot[0])

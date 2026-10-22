@@ -4,12 +4,14 @@
 TOUCHES THE ARM. Gravity compensation at 100 Hz, so the arm stays backdrivable. One
 confirmation is one datapoint; a region is weighted by confirming there again, after
 re-posing the arm slightly. "u" withdraws the last datapoint. The MeshCat view shows each
-datapoint as a key frame and refits the kernel density on every change.
+datapoint as a key frame and refits the kernel density on every change. It also shows
+the master: its path, its key frames by phase, and guide keys at the arm's phase and a
+little ahead, so the turn shows where it is due.
 
-An existing exploration_*.npz given as the argument is extended; it is only read, and the
+An existing exploration_*.npz given as the second argument is extended; it is only read, and the
 session writes a new timestamped file. Ctrl-C holds the arm, then saves.
 
-Run from final/src:  sh run.sh teach_exploration.py [exploration_<timestamp>.npz]
+Run from final/src:  sh run.sh teach_exploration.py master_<ts>.npz [exploration_<ts>.npz]
 """
 
 import sys
@@ -74,5 +76,7 @@ def main(robot, view: TeachingView, start: Path | None = None, out_dir: Path = O
 
 
 if __name__ == "__main__":
-    view = TeachingView()  # before connecting, so the first torque is not kept waiting
-    main(connect_arm(), view, Path(sys.argv[1]) if len(sys.argv) > 1 else None)
+    view = TeachingView(
+        np.load(sys.argv[1])["q"]
+    )  # before connecting, so the first torque is not kept waiting
+    main(connect_arm(), view, Path(sys.argv[2]) if len(sys.argv) > 2 else None)
