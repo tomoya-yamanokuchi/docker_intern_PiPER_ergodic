@@ -41,7 +41,6 @@ max-args = 6
 "tests/*" = ["PLR2004", "ARG"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
 addopts = "-q --strict-markers"
 
 # Optional but recommended for numerical code — see /numeric-check.

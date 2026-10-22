@@ -534,10 +534,9 @@ treated, and do not tidy it.
 independent computation — an analytic result, a finite difference, a round trip —
 never against a value just printed and pasted in (the `numeric-check` skill).
 
-**There is no pytest in the container**, and `pyproject.toml` still points
-`testpaths` at a `tests/` directory that does not exist, so the `test_*.py` files
-beside each module are run by importing them and calling their `test_*` functions
-(43 of them pass as of this writing). A quick offline check needing no arm: both
+**There is no pytest in the container**, so the `test_*.py` files beside each
+module are run by importing them and calling their `test_*` functions (43 of them
+pass as of this writing; `final/check.sh` does this for `final/`). A quick offline check needing no arm: both
 controllers reduce to gravity compensation at zero error, which at the zero pose
 is `[0, 3.188, -2.807, -0.011, -0.235, 0]` N·m, with the `link6` origin at
 `[0.0561, 0, 0.2132]` m and `peg_tcp` at `[0.1159, 0, 0.2184]` m — the peg link
