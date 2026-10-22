@@ -543,15 +543,13 @@ is massless, so adding it left the gravity torque unchanged.
 
 ### Claude Code configuration (`.claude/`)
 
-- `settings.json` — the PostToolUse lint hook, allowed read-only commands, and a
-  deny list of arm-touching commands. **The deny list is badly out of date and
-  cannot be relied on.** It names `piper/main_*` and `agx_reference/*`, plus
-  `main.py` and `print_joint_limits.py`, which no longer exist (the `piper_sdk`
-  era). It does **not** name any of the five scripts that actually touch the arm
-  today: `record_joint_angles.py`, `teach_datapoints.py`, `play_joint_angles.py`,
-  `identify_friction.py` and `run_ergodic_pipeline.py`. It also denies `python test_*`, which now blocks
-  hardware-free tests instead of anything dangerous. Hard rule 1 is the real
-  protection and applies regardless.
+- `settings.json` — the PostToolUse lint hook, allowed read-only commands, and the
+  PreToolUse `hooks/arm-guard.py`: it refuses a Bash command that runs Python whose
+  text, or any `.py` file it names, mentions an arm module or script (its regex is
+  the list). Every run goes through `docker exec`, which no permission pattern can
+  see into, so the hook replaced the old deny list. It reads one level only, and it
+  judges a compound command whole: keep a read of an arm file out of a Python run.
+  Hard rule 1 applies regardless.
 - `rules/hardware.md` — extra rules loaded when editing
   `agx_reference/piper/**` or `agx_reference/controller/**`.
 - `agents/reviewer.md` — a fresh-context diff reviewer for correctness and scope.
