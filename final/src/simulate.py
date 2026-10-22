@@ -18,7 +18,7 @@ feedforward is set as it would be identified on such an arm: no friction term an
 gravity correction (the one measured on the real arm's joint 2). run_trials.py is the
 same as on the arm.
 
-Run from final/src:  sh run.sh simulate.py [e2t2|sliding|retry|recall] [n_trials]
+Run from final/src:  sh run.sh simulate.py [e2t2|sliding|retry] [n_trials]
 """
 
 import sys

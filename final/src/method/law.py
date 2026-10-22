@@ -27,7 +27,6 @@ METHODS = {  # name -> (sliding, forgetting, retry)
     "e2t2": (False, False, False),
     "sliding": (True, True, False),
     "retry": (True, True, True),
-    "recall": (True, True, False),  # the weights are method.recall's, the rest is sliding's
 }
 FLUSH = 5  # the statistic is rounded every this many steps
 

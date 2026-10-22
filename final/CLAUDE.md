@@ -7,7 +7,7 @@ A tree of its own: `final/src` never imports `workspace/src`, and runs only thro
 ## Where things are
 
 - **The method**: `src/method/law.py` (`Law`; `METHODS` names every method a run takes),
-  `recall.py`, `task.py` (labelling, `Task`), `pose.py` (the pose metric).
+  `task.py` (labelling, `Task`), `pose.py` (the pose metric).
 - **Its source**: `src/notebooks/Sequential_E2T2_peg_slide_2D.ipynb`. `law.py` is a port
   of it, and `src/method/test_against_notebook.py` holds the two together. The experiments
   notebook writes its results to `final/output/`.

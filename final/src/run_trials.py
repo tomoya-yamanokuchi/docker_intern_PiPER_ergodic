@@ -3,7 +3,7 @@
 
 TOUCHES THE ARM. Methods: e2t2 (static target, its statistic handed on across trials, as
 its paper does), sliding (sliding target with forgetting, fresh each trial) and retry
-(sliding with the retry) and recall (sliding whose target keeps the whole past, method/recall.py). Before every trial the arm is backdrivable: re-lock the door,
+(sliding with the retry). Before every trial the arm is backdrivable: re-lock the door,
 take the key out, put the arm near the master's start (the distance is printed) and press
 Enter. The law is not stepped meanwhile, so the handling never enters the statistic.
 
@@ -19,7 +19,7 @@ at the measured pose, not where the last one ended, keeps the commanded velocity
 law's own, so the friction feedforward always has the law's direction, even when the arm
 lags. A lead grows only until the spring pushes with MAX_FORCE.
 
-Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry|recall> task_<ts>.npz [n_trials]
+Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry> task_<ts>.npz [n_trials]
 """
 
 import sys
@@ -43,7 +43,6 @@ from arm.piper import connect_arm, hold_current_pose
 from core.agx_pinocchio import AgxPinocchio
 from method.law import METHODS, Law
 from method.pose import MAX_SPEED, ROTATION_LENGTH, to_pose
-from method.recall import RecallLaw
 from method.task import Task
 from robot import OUTPUT_DIR, URDF_PATH, measured_state
 from visualization.views import RunView
@@ -156,7 +155,7 @@ def prepare(method: str, task_path: Path) -> tuple:
     """Everything slow, built before the arm is connected: the law, the controller, the view."""
     task = Task.load(task_path)
     return (
-        (RecallLaw if method == "recall" else Law)(task, method, 1.0 / ERGODIC_FREQ_HZ),
+        Law(task, method, 1.0 / ERGODIC_FREQ_HZ),
         Impedance(),
         RunView(task),
         AgxPinocchio(str(URDF_PATH)),
