@@ -8,7 +8,7 @@ take the key out, put the arm near the master's start (the distance is printed) 
 Enter. The law is not stepped meanwhile, so the handling never enters the statistic.
 
 During a trial, Enter ends it as a success and "a" as a failure; so does the time limit,
-20 passes along the master at full speed. Ctrl-C holds the arm and saves the trials so far
+TIME_LIMIT. Ctrl-C holds the arm and saves the trials so far
 to run_<method>_<timestamp>.npz in final/output; view one with view_run.py.
 
 Control is fully online, as closed-loop ergodic control is meant to be: every
@@ -49,7 +49,7 @@ from robot import OUTPUT_DIR, URDF_PATH, measured_state
 from visualization.views import RunView
 
 MAX_FORCE = 5.0  # N, the most the spring may push the key with
-PASSES = 20  # a trial's time limit, in passes along the master at full speed
+TIME_LIMIT = 600.0  # s, a trial's
 CYCLES = round(CONTROL_FREQ_HZ / ERGODIC_FREQ_HZ)  # control cycles per law step
 PRINT_EVERY = 10  # law steps between progress lines
 
@@ -158,7 +158,6 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
     law, impedance, view, pin, task = setup
     law.new_trial()
     view.new_trial()
-    time_limit = PASSES * task.S_m / MAX_SPEED
     max_lead = MAX_FORCE / impedance.controller.Kc[:3].max()  # m
     t0, cycle, tau = time.monotonic(), 0, np.zeros(6)
     y_cmd = measured_state(pin, task, np.array(robot.get_joint_angles().msg))
@@ -179,7 +178,7 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
         command = read_command()
         if command in ("", "a"):
             return "success" if command == "" else "abort"
-        if start - t0 > time_limit:
+        if start - t0 > TIME_LIMIT:
             return "limit"
         # Every torque cycle's own length; a law cycle is one with cycle % CYCLES == 0.
         log["cycle_work"].append((trial, cycle, time.monotonic() - start))
