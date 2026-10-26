@@ -7,9 +7,10 @@ its paper does), sliding (sliding target with forgetting, fresh each trial) and 
 take the key out, put the arm near the master's start (the distance is printed) and press
 Enter. The law is not stepped meanwhile, so the handling never enters the statistic.
 
-During a trial, Enter ends it as a success and "a" as a failure; so does the time limit,
-TIME_LIMIT. Ctrl-C holds the arm and saves the trials so far
-to run_<method>_<timestamp>.npz in final/output; view one with view_run.py.
+A trial is a success once the phase passes SUCCESS_PHASE, and a failure at TIME_LIMIT;
+Enter ends it as an abort, for a trial the operator had to touch. Ctrl-C holds the arm and
+saves the trials so far to run_<method>_<timestamp>.npz in final/output; view one with
+view_run.py.
 
 Control is fully online, as closed-loop ergodic control is meant to be: every
 ERGODIC_FREQ_HZ the measured pose goes into the law and its next state comes out,
@@ -50,6 +51,7 @@ from visualization.views import RunView
 
 MAX_FORCE = 5.0  # N, the most the spring may push the key with
 TIME_LIMIT = 600.0  # s, a trial's
+SUCCESS_PHASE = 0.95
 CYCLES = round(CONTROL_FREQ_HZ / ERGODIC_FREQ_HZ)  # control cycles per law step
 PRINT_EVERY = 10  # law steps between progress lines
 
@@ -172,12 +174,13 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
         if answer is not None:
             step, twist = take_answer(answer, sent, view, trial, log)
             y_cmd, left = sent[2], CYCLES
+            if answer[1].phi > SUCCESS_PHASE:
+                return "success"
         if left:
             y_cmd, left = y_cmd + step, left - 1
         tau = impedance.send(robot, q, to_pose(y_cmd, task.R0), twist)
-        command = read_command()
-        if command in ("", "a"):
-            return "success" if command == "" else "abort"
+        if read_command() is not None:
+            return "abort"
         if start - t0 > TIME_LIMIT:
             return "limit"
         # Every torque cycle's own length; a law cycle is one with cycle % CYCLES == 0.
@@ -220,9 +223,7 @@ def main(
     try:
         for trial in range(n_trials):
             place_arm(robot, pin, task, trial)
-            print(
-                f"trial {trial + 1} of {n_trials}, {method}: Enter on success, a then Enter to abort"
-            )
+            print(f"trial {trial + 1} of {n_trials}, {method}: Enter aborts")
             outcomes.append(run_trial(robot, setup, trial, log))
             print(f"trial {trial + 1}: {outcomes[-1]} after {log['t'][-1]:.1f} s")
     except KeyboardInterrupt:

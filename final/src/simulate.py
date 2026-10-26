@@ -8,10 +8,9 @@ through teach_exploration.py with an Enter on each. label.py labels them, and
 run_trials.py runs the method on the driven fake arm, in real time, watchable in MeshCat.
 
 The fake arm has no door, so nothing blocks a stage and nothing needs a retry; the scripted
-operator places the arm at the master's start and calls a trial a success once the key's
-tip is within twice the datapoints' scatter of where the master ends, in position and in
-turn alike. What this proves is the chain and the loop,
-not the method's success on the task. Files go to final/output/sim.
+operator places the arm at the master's start and then keeps its hands off, so a trial ends
+as run_trials ends one on the arm. What this proves is the chain and the loop, not the
+method's success on the task. Files go to final/output/sim.
 
 The fake arm is idealised, with no friction, to check the method and the loop. The
 feedforward is set as it would be identified on such an arm: no friction term and no
@@ -33,7 +32,7 @@ import run_trials
 import teach_exploration
 from arm.fake import FakePiper
 from core.agx_pinocchio import AgxPinocchio
-from method.pose import ROTATION_LENGTH, to_metric
+from method.pose import ROTATION_LENGTH
 from robot import OUTPUT_DIR, TCP_FRAME, URDF_PATH
 from visualization.views import TeachingView
 
@@ -100,10 +99,10 @@ def teaching_path(q_points: np.ndarray) -> tuple[np.ndarray, set[int]]:
 
 
 class Operator:
-    """Stands in for the person at the arm during run_trials: places, and calls success."""
+    """Stands in for the person at the arm during run_trials: places it, then never aborts."""
 
-    def __init__(self, robot: FakePiper, pin: AgxPinocchio, task):
-        self.robot, self.pin, self.task, self.placing = robot, pin, task, False
+    def __init__(self, robot: FakePiper, task):
+        self.robot, self.task, self.placing = robot, task, False
         self.rng = np.random.default_rng(1)
 
     def drain(self) -> None:  # run_trials calls it as placing begins
@@ -115,11 +114,7 @@ class Operator:
             self.robot.q = self.task.q_master[0] + self.rng.normal(0.0, 0.01, 6)
             self.robot.qd[:] = 0.0
             return ""
-        # Both the push and the turn: a key pushed home unturned opens no door.
-        p, rot = self.pin.forward_kinematics(self.robot.q, TCP_FRAME)
-        gap = to_metric(p[None], rot[None], self.task.R0)[0] - self.task.master[-1]
-        done = max(np.linalg.norm(gap[:3]), np.linalg.norm(gap[3:])) < 2 * SCATTER
-        return "" if done else None
+        return None
 
 
 def main(method: str, n_trials: int) -> None:
@@ -144,7 +139,7 @@ def main(method: str, n_trials: int) -> None:
     ideal = setup[1].feed_forward
     ideal.set_friction_params(*[np.zeros(6)] * 3, stribeck_velocity=np.ones(6))
     ideal.gravity_scale = np.ones(6)
-    operator = Operator(robot, pin, setup[4])
+    operator = Operator(robot, setup[4])
     run_trials.read_command, run_trials.drain_stdin = operator.read, operator.drain
     run_trials.main(robot, setup, method, task_path, n_trials, OUT)
 
