@@ -92,8 +92,8 @@ def plan(y: np.ndarray, y_next: np.ndarray, lead: float) -> tuple[np.ndarray, np
 
 
 class LawProcess:
-    """The law in its own process (method.law.serve). A step asked for on one law cycle must
-    be back by the next, or the trial raises and main's finally holds the arm."""
+    """The law in its own process (method.law.serve). A step not back by the next law cycle
+    is late, and that cycle asks for none."""
 
     def __init__(self, task_path: Path, method: str, dt: float):
         # spawn, not fork: RunView's thread already runs, and a fork copies its locks held.
@@ -110,8 +110,6 @@ class LawProcess:
         self.pending = False
 
     def ask(self, y: np.ndarray, max_lead: float) -> None:
-        if self.pending:
-            raise RuntimeError("the law step was not back within one law period")
         self.conn.send(("step", y, max_lead))
         self.pending = True
 
@@ -151,6 +149,13 @@ def take_answer(answer: tuple, sent: tuple, view, trial: int, log: dict) -> tupl
     return plan(y, y_next, info.lead)
 
 
+def ended(t: float) -> str | None:
+    """'abort' on the operator's Enter, 'limit' t s into a trial past TIME_LIMIT, else None."""
+    if read_command() is not None:
+        return "abort"
+    return "limit" if t > TIME_LIMIT else None
+
+
 def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
     """One trial from wherever the arm stands: 'success', 'abort' or 'limit'.
 
@@ -168,8 +173,12 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
         start = time.monotonic()
         q = np.array(robot.get_joint_angles().msg)
         if cycle % CYCLES == 0:
-            sent = (start - t0, q, measured_state(pin, task, q), tau)
-            law.ask(sent[2], max_lead)
+            # A late step costs the law one period, not the trial: the walk holds meanwhile.
+            if law.pending:
+                log["late"].append((trial, cycle))
+            else:
+                sent = (start - t0, q, measured_state(pin, task, q), tau)
+                law.ask(sent[2], max_lead)
         answer = law.answer()
         if answer is not None:
             step, twist = take_answer(answer, sent, view, trial, log)
@@ -179,10 +188,8 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
         if left:
             y_cmd, left = y_cmd + step, left - 1
         tau = impedance.send(robot, q, to_pose(y_cmd, task.R0), twist)
-        if read_command() is not None:
-            return "abort"
-        if start - t0 > TIME_LIMIT:
-            return "limit"
+        if (end := ended(start - t0)) is not None:
+            return end
         # Every torque cycle's own length; a law cycle is one with cycle % CYCLES == 0.
         log["cycle_work"].append((trial, cycle, time.monotonic() - start))
         cycle += 1
