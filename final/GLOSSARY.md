@@ -57,14 +57,14 @@ The datapoints taught for a task, one confirmed pose at a time. The target is bu
 _Avoid_: reference distribution, cloud
 
 **Datapoint**:
-One taught state of the exploration distribution, labelled with the phase of its nearest master sample.
+One taught state of the exploration distribution, labelled with the phase of its nearest master sample, nearest in position and orientation together.
 _Avoid_: sample, demo point
 
 **Labelling**:
-Giving every datapoint the phase of its nearest master sample. It needs only the master and the datapoints, never the arm.
+Giving every datapoint the phase of its nearest master sample, in position and orientation together. It needs only the master and the datapoints, never the arm.
 
 **Phase**:
-How far along the master the task has come, from 0 at its start to 1 at its end. It is estimated from the tool's pose alone, so in a world that deviates from the taught one it can be wrong: a pose can look like a later stage although an earlier one never succeeded.
+How far along the master the task has come, from 0 at its start to 1 at its end. It is estimated from the tool's pose alone, position and orientation together, so in a world that deviates from the taught one it can be wrong: a pose can look like a later stage although an earlier one never succeeded.
 _Avoid_: progress, stage index
 
 **False progress**:
@@ -72,13 +72,17 @@ The phase rising although an earlier stage has not succeeded, such as a key turn
 _Avoid_: fake progress, wrong phase
 
 **Tube**:
-The region around the master in which a pose is credible for its phase: narrow where the taught datapoints are, such as in the lock. Outside it the phase does not move.
+The region around the master in which a pose is credible for some stage of it: as wide as the datapoints taught at that stage spread, so narrow in the lock, and never narrower than the offset from the taught world that must still read as progress. Outside it the phase does not move.
 _Avoid_: canal, envelope, corridor
 
 **Front**:
 The phase up to which the sliding target holds datapoints: the current phase plus two resolvable widths.
 
 ## Method
+
+**E2T2**:
+Ergodic exploration of the whole exploration distribution at once, its statistic kept across the trials of a sequence, as it was proposed. The baseline every method is compared against.
+_Avoid_: regular ergodic control, plain ergodic control, vanilla
 
 **Sensorless**:
 Knowing only the robot's joint angles, and so the tool's pose: no force, contact or vision sensing. Everything the method knows about the world, including the phase, comes from these.
@@ -97,7 +101,7 @@ The phase rising one resolvable width above the lowest phase it has reached sinc
 The time since the last advance.
 
 **Retry**:
-The sliding target's back edge retreating during a stall, one stage per forgetting horizon, so that earlier stages return to the target. A key that missed the keyhole, read as turning, is recovered this way within the trial.
+The sliding target's back edge retreating during a stall at the arm's full speed along the master, so that earlier stages return to the target as fast as the arm can go back to them. A key that missed the keyhole, read as turning, is recovered this way within the trial.
 
 **Statistic**:
 The record of where the robot has been, as coefficients.
@@ -110,15 +114,15 @@ _Avoid_: memory length, window
 ## Experiment
 
 **Trial**:
-One attempt, from the master's start until the goal or the step limit.
+One attempt, from the master's start until the goal or the time limit.
 _Avoid_: run, episode, attempt
 
 **Sequence**:
-Consecutive trials in one world at one offset. Only the state and the block are reset between trials; the statistic is handed on.
+Consecutive trials in one world at one offset. Only the state and the block are reset between trials. E2T2 hands its statistic on, as it was proposed; the forgetting methods start every trial with a fresh one, so their trials are independent.
 _Avoid_: session, series
 
 **Success**:
-A trial that reaches the goal within the step limit. A trial that ends in a slip-out or a dead end is a failure.
+A trial that reaches the goal within the time limit: on the arm, the phase passing 0.95, so an opening that stalls below it is a failure; in 2-D, the block reaching the goal, so a slip-out or a dead end is a failure.
 
 **Unassisted success**:
 A success in which the operator never touches the arm during the trial. A trial the operator helped home, such as by wiggling the key the last centimetre in, is assisted, whatever it ended in.

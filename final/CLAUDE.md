@@ -18,7 +18,9 @@ A tree of its own: `final/src` never imports `workspace/src`, and runs only thro
   `label.py`, `run_trials.py` (ARM), `view_master.py` / `view_labels.py` / `view_run.py`.
   `simulate.py` runs the whole chain on the fake arm. Each docstring gives its usage.
 - **Kept data**: `saved_recordings/door/` holds the master, exploration and task of the
-  first unassisted success (tag `door-working-v1`); `final/output/` is gitignored.
+  first unassisted success (tag `door-working-v1`), and with the same master the task
+  frozen for the experiments, `task_20261023_131342` (tag `door-experiment-v1`);
+  `final/output/` is gitignored.
 - **Offline analysis of an arm run**: `final/output/run_<method>_<ts>.npz`. Read it with the
   hardware-free modules: `robot.measured_state` turns a logged `q` into the law's state.
 
@@ -36,11 +38,14 @@ Deliberate, so a result from one does not carry over unchecked:
 - **Statistic across trials**: the notebook hands it on through a sequence for every
   method; `Law.new_trial` starts a fresh one for every forgetting method, only E2T2's is
   handed on.
-- **Retry's retreat rate**: the notebook retreats `delta / T_f` phase per second
-  (GLOSSARY "Retry" describes this); `law.py` retreats `MAX_SPEED / S_m`, the arm's own
-  speed along the master.
-- **The tube**: `law.py`'s phase holds while the pose is outside it (GLOSSARY "Tube");
-  the notebook's filter has none, and `test_against_notebook` compares the filter without it.
+- **Retry's retreat rate**: the notebook retreats `delta / T_f` phase per second;
+  `law.py` retreats `MAX_SPEED / S_m`, the arm's own speed along the master, and that is
+  the method (GLOSSARY "Retry").
+- **Labels and phase in 6-D**: the notebook labels datapoints and filters the phase on
+  the tip position only; `task.py` and `law.py` use the whole pose in the metric, and that
+  is the method (GLOSSARY "Labelling", "Phase").
+- **The tube**: `law.py`'s phase holds while the pose is outside it, and that is the
+  method (GLOSSARY "Tube"); the notebook's filter has none, and `test_against_notebook` compares the filter without it.
 - **The lead and the cube clamp** exist only in `law.py` (the arm lags; the notebook's
   world does not).
 - **6-D numerics** (gradient contraction, Lambda unrounded, statistic rounding): the
