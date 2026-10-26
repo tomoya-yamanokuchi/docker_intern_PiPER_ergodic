@@ -22,6 +22,7 @@ lags. A lead grows only until the spring pushes with MAX_FORCE.
 Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry> task_<ts>.npz [n_trials]
 """
 
+import multiprocessing
 import sys
 import time
 from collections import defaultdict
@@ -41,7 +42,7 @@ from arm.control import (
 )
 from arm.piper import connect_arm, hold_current_pose
 from core.agx_pinocchio import AgxPinocchio
-from method.law import METHODS, Law
+from method.law import METHODS, serve
 from method.pose import MAX_SPEED, ROTATION_LENGTH, to_pose
 from method.task import Task
 from robot import OUTPUT_DIR, URDF_PATH, measured_state
@@ -88,48 +89,92 @@ def plan(y: np.ndarray, y_next: np.ndarray, lead: float) -> tuple[np.ndarray, np
     return min(1.0, lead / length) * delta / CYCLES, twist
 
 
+class LawProcess:
+    """The law in its own process (method.law.serve). A step asked for on one law cycle must
+    be back by the next, or the trial raises and main's finally holds the arm."""
+
+    def __init__(self, task_path: Path, method: str, dt: float):
+        # spawn, not fork: RunView's thread already runs, and a fork copies its locks held.
+        ctx = multiprocessing.get_context("spawn")
+        self.conn, child = ctx.Pipe()
+        ctx.Process(target=serve, args=(child, task_path, method, dt), daemon=True).start()
+        self.conn.recv()  # the law is built
+        self.pending = False
+
+    def new_trial(self) -> None:
+        if self.pending:  # the last trial ended with a step out; it must not open this one
+            self.conn.recv()
+        self.conn.send(("trial",))
+        self.pending = False
+
+    def ask(self, y: np.ndarray, max_lead: float) -> None:
+        if self.pending:
+            raise RuntimeError("the law step was not back within one law period")
+        self.conn.send(("step", y, max_lead))
+        self.pending = True
+
+    def answer(self) -> tuple | None:
+        """(y_next, info, seconds) once the step is back, else None; never blocks."""
+        if not (self.pending and self.conn.poll()):
+            return None
+        self.pending = False
+        return self.conn.recv()
+
+
+def take_answer(answer: tuple, sent: tuple, view, trial: int, log: dict) -> tuple:
+    """Log and show a step that came back; its walk's step per cycle and twist."""
+    y_next, info, step_dt = answer
+    t, q, y, tau = sent
+    view.update(q, y_next, info.phi, info.w)
+    row = {
+        "trial": trial,
+        "t": t,
+        "q": q,
+        "y_cmd": y_next,
+        "phi": info.phi,
+        "stall": info.stall,
+        "rho": info.rho,
+        "w": info.w,
+        "lead": info.lead,
+        "tau": tau,
+        "step_dt": step_dt,
+    }
+    for key, value in row.items():
+        log[key].append(value)
+    if len(log["t"]) % PRINT_EVERY == 1:
+        print(
+            f"  t {t:5.1f} s  phase {info.phi:.2f}  stall {info.stall:4.1f} s"
+            f"  lead {info.lead * 1e3:.1f} mm"
+        )
+    return plan(y, y_next, info.lead)
+
+
 def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
-    """One trial from wherever the arm stands: 'success', 'abort' or 'limit'."""
+    """One trial from wherever the arm stands: 'success', 'abort' or 'limit'.
+
+    The walk to a law step's state starts on the cycle the step comes back, from the state
+    it was asked for, and is CYCLES increments long.
+    """
     law, impedance, view, pin, task = setup
     law.new_trial()
     view.new_trial()
     time_limit = PASSES * task.S_m / MAX_SPEED
     max_lead = MAX_FORCE / impedance.controller.Kc[:3].max()  # m
     t0, cycle, tau = time.monotonic(), 0, np.zeros(6)
+    y_cmd = measured_state(pin, task, np.array(robot.get_joint_angles().msg))
+    step, twist, left = np.zeros_like(y_cmd), np.zeros(6), 0
     while True:
         start = time.monotonic()
         q = np.array(robot.get_joint_angles().msg)
         if cycle % CYCLES == 0:
-            y_cmd = measured_state(pin, task, q)
-            step_start = time.monotonic()
-            y_next, info = law.step(y_cmd, max_lead)
-            step_dt = time.monotonic() - step_start
-            step, twist = plan(y_cmd, y_next, info.lead)
-            view.update(q, y_next, info.phi, info.w)
-            for key, value in zip(
-                ("trial", "t", "q", "y_cmd", "phi", "stall", "rho", "w", "lead", "tau", "step_dt"),
-                (
-                    trial,
-                    start - t0,
-                    q,
-                    y_next,
-                    info.phi,
-                    info.stall,
-                    info.rho,
-                    info.w,
-                    info.lead,
-                    tau,
-                    step_dt,
-                ),
-                strict=True,
-            ):
-                log[key].append(value)
-            if cycle % (CYCLES * PRINT_EVERY) == 0:
-                print(
-                    f"  t {start - t0:5.1f} s  phase {info.phi:.2f}  stall {info.stall:4.1f} s"
-                    f"  lead {info.lead * 1e3:.1f} mm"
-                )
-        y_cmd = y_cmd + step
+            sent = (start - t0, q, measured_state(pin, task, q), tau)
+            law.ask(sent[2], max_lead)
+        answer = law.answer()
+        if answer is not None:
+            step, twist = take_answer(answer, sent, view, trial, log)
+            y_cmd, left = sent[2], CYCLES
+        if left:
+            y_cmd, left = y_cmd + step, left - 1
         tau = impedance.send(robot, q, to_pose(y_cmd, task.R0), twist)
         command = read_command()
         if command in ("", "a"):
@@ -160,7 +205,7 @@ def prepare(method: str, task_path: Path) -> tuple:
     """Everything slow, built before the arm is connected: the law, the controller, the view."""
     task = Task.load(task_path)
     return (
-        Law(task, method, 1.0 / ERGODIC_FREQ_HZ),
+        LawProcess(task_path, method, 1.0 / ERGODIC_FREQ_HZ),
         Impedance(),
         RunView(task),
         AgxPinocchio(str(URDF_PATH)),

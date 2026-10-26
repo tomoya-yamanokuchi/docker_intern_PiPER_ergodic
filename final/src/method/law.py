@@ -16,7 +16,9 @@ Three things differ from the notebook, for speed and accuracy in six dimensions:
   eps 1e-4, r the static target's rank), not the 2-D notebook's exact one.
 """
 
+import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import tt
@@ -267,3 +269,22 @@ class Law:
         step = y_next - y_measured
         self.last = y_measured, step * min(1.0, lead / max(np.linalg.norm(step), 1e-12))
         return y_next, StepInfo(phi, self.stall * self.dt, rho, w, lead)
+
+
+def serve(conn, task_path: Path, method: str, dt: float) -> None:
+    """The law in a process of its own, so a step cannot hold up a torque cycle: inside the
+    torque loop it took 12 ms median and overran most law cycles (2026-10-26).
+
+    Sends None once the law is built. Then ("trial",) starts a trial and
+    ("step", y, max_lead) is answered with (y_next, info, the step's seconds).
+    """
+    law = Law(Task.load(task_path), method, dt)
+    conn.send(None)
+    while True:
+        request = conn.recv()
+        if request[0] == "trial":
+            law.new_trial()
+        else:
+            start = time.perf_counter()
+            y_next, info = law.step(*request[1:])
+            conn.send((y_next, info, time.perf_counter() - start))
