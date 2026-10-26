@@ -101,11 +101,13 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
         q = np.array(robot.get_joint_angles().msg)
         if cycle % CYCLES == 0:
             y_cmd = measured_state(pin, task, q)
+            step_start = time.monotonic()
             y_next, info = law.step(y_cmd, max_lead)
+            step_dt = time.monotonic() - step_start
             step, twist = plan(y_cmd, y_next, info.lead)
             view.update(q, y_next, info.phi, info.w)
             for key, value in zip(
-                ("trial", "t", "q", "y_cmd", "phi", "stall", "rho", "w", "lead", "tau"),
+                ("trial", "t", "q", "y_cmd", "phi", "stall", "rho", "w", "lead", "tau", "step_dt"),
                 (
                     trial,
                     start - t0,
@@ -117,6 +119,7 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
                     info.w,
                     info.lead,
                     tau,
+                    step_dt,
                 ),
                 strict=True,
             ):
@@ -133,6 +136,8 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
             return "success" if command == "" else "abort"
         if start - t0 > time_limit:
             return "limit"
+        # Every torque cycle's own length; a law cycle is one with cycle % CYCLES == 0.
+        log["cycle_work"].append((trial, cycle, time.monotonic() - start))
         cycle += 1
         keep_rate(start)
 
