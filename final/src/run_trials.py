@@ -230,9 +230,15 @@ def main(
         print("\ninterrupted, holding the current pose")
         if log["trial"] and len(outcomes) == log["trial"][-1]:
             outcomes.append("interrupted")
+    except Exception:
+        if log["trial"] and len(outcomes) == log["trial"][-1]:
+            outcomes.append("error")
+        raise
     finally:
         hold_current_pose(robot, np.array(robot.get_joint_angles().msg))
-    return save(log, outcomes, method, task_path, out_dir)
+        # Here, not after: a trial that raises must not lose the sequence's earlier trials.
+        path = save(log, outcomes, method, task_path, out_dir)
+    return path
 
 
 if __name__ == "__main__":
