@@ -136,13 +136,25 @@ class PhaseFilter:
     ):
         self.master, self.h, self.phi_master = master, h, s / s[-1]
         self.precision, self.gate = precision, chi2.ppf(0.99, master.shape[1])
-        self.arc2 = (s[:, None] - s[None]) ** 2
-        self.min_sigma = s[-1] / N_M
+        self.min_sigma = s[-1] / N_M  # also the samples' spacing, as they are equal in arc
         self.log_belief, self.y_prev, self.phi = None, None, None
 
     def inside(self, y: np.ndarray) -> bool:
         e = y - self.master
         return bool(np.einsum("ni,nij,nj->n", e, self.precision, e).min() <= self.gate)
+
+    def predict(self, sigma: float) -> np.ndarray:
+        """The belief convolved with the random walk's Gaussian in arc length, cut at 12 sigma.
+
+        The cut drops only terms the kernel weighs below e^-72. At 8 sigma (e^-32) the phase
+        moved by up to 3e-4 on arm runs, where a belief far along the master outweighed the
+        near one by that much; the dense 401 x 401 sum cost half the law step.
+        """
+        half = int(np.ceil(12 * sigma / self.min_sigma))
+        k = np.arange(-half, half + 1)
+        padded = np.pad(self.log_belief, half, constant_values=-np.inf)
+        windows = np.lib.stride_tricks.sliding_window_view(padded, len(k))
+        return logsumexp(windows - (k * self.min_sigma) ** 2 / (2 * sigma**2), axis=1)
 
     def update(self, y: np.ndarray) -> float:
         if self.log_belief is not None and self.precision is not None and not self.inside(y):
@@ -151,9 +163,8 @@ class PhaseFilter:
         if self.log_belief is None:
             log_belief = log_lik
         else:
-            sigma = max(np.linalg.norm(y - self.y_prev), self.min_sigma)
             log_belief = (
-                logsumexp(self.log_belief[None] - self.arc2 / (2 * sigma**2), axis=1) + log_lik
+                self.predict(max(np.linalg.norm(y - self.y_prev), self.min_sigma)) + log_lik
             )
         self.log_belief = log_belief - logsumexp(log_belief)
         self.y_prev = y
