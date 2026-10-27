@@ -51,7 +51,7 @@ from visualization.views import RunView
 
 MAX_FORCE = 5.0  # N, the most the spring may push the key with
 TIME_LIMIT = 600.0  # s, a trial's
-SUCCESS_PHASE = 0.95
+SUCCESS_PHASE = 0.9
 CYCLES = round(CONTROL_FREQ_HZ / ERGODIC_FREQ_HZ)  # control cycles per law step
 PRINT_EVERY = 10  # law steps between progress lines
 

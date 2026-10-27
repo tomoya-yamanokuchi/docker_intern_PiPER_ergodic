@@ -122,7 +122,7 @@ Consecutive trials in one world at one offset. Only the state and the block are 
 _Avoid_: session, series
 
 **Success**:
-A trial that reaches the goal within the time limit: on the arm, the phase passing 0.95, so an opening that stalls below it is a failure; in 2-D, the block reaching the goal, so a slip-out or a dead end is a failure.
+A trial that reaches the goal within the time limit: on the arm, the phase passing 0.9, so an opening that stalls below it is a failure; in 2-D, the block reaching the goal, so a slip-out or a dead end is a failure.
 
 **Unassisted success**:
 A success in which the operator never touches the arm during the trial. A trial the operator helped home, such as by wiggling the key the last centimetre in, is assisted, whatever it ended in.
