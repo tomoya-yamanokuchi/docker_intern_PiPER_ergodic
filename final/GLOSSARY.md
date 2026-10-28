@@ -121,6 +121,9 @@ _Avoid_: run, episode, attempt
 Consecutive trials in one world at one offset. Only the state and the block are reset between trials. E2T2 hands its statistic on, as it was proposed; the forgetting methods start every trial with a fresh one, so their trials are independent.
 _Avoid_: session, series
 
+**Time to unlock**:
+The time from a successful trial's start until the phase last rises past the end of the turn, staying past it until the success: the time the insertion and the turn took. A pass the phase falls back from is false progress and does not count, and a failed trial has no time to unlock.
+
 **Success**:
 A trial that reaches the goal within the time limit: on the arm, the phase passing 0.9, so an opening that stalls below it is a failure; in 2-D, the block reaching the goal, so a slip-out or a dead end is a failure.
 
