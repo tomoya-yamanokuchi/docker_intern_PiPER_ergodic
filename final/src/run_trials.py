@@ -8,8 +8,9 @@ its paper does), sliding (sliding target with forgetting, fresh each trial) and 
 back to its start from the sample nearest the arm, shifted by the arm's offset from that
 sample, closing the door and taking the key out; then a walk removes the offset. Only a
 run that starts away from the master's start, or a reset that fails, needs the operator:
-the arm is backdrivable, re-lock the door, take the key out, put the arm near the master's
-start (the distance is printed) and press Enter, and it walks the rest. A run that starts
+the arm is backdrivable; close the door, and either press Enter with the key still in the
+lock, or take it out and put the arm near the master's start (the distance is printed)
+first. Either way it walks the rest along the master. A run that starts
 where the last one's reset ended needs no one, so sequences can follow each other:
 
   for i in 1 2 3; do for m in e2t2 retry; do sh run.sh run_trials.py $m <task> 4 --auto || break 2; done; done
@@ -62,7 +63,7 @@ from visualization.views import RunView
 MAX_FORCE = 5.0  # N, the most the spring may push the key with
 # N, the same during a reset: the key sticks in the keyhole on the way out, and a reset is
 # rig, not method, so it may pull harder than a trial pushes.
-RESET_FORCE = 10.0
+RESET_FORCE = 15.0
 TIME_LIMIT = 600.0  # s, a trial's
 SUCCESS_PHASE = 0.9
 RESET_LIMIT = 60.0  # s, a walk's; the whole master at full speed takes about 16 s
@@ -74,15 +75,16 @@ CYCLES = round(CONTROL_FREQ_HZ / ERGODIC_FREQ_HZ)  # control cycles per law step
 PRINT_EVERY = 10  # law steps between progress lines
 
 
-def place_arm(robot, pin: AgxPinocchio, task: Task, trial: int) -> None:
-    """Gravity compensation until Enter, printing the distance to the master's start."""
+def place_arm(robot, pin: AgxPinocchio, task: Task, trial: int) -> np.ndarray:
+    """Gravity compensation until Enter, printing the distance to the master's start; (d,),
+    the arm's state at Enter."""
     drain_stdin()
     cycle = 0
     while True:
         start = time.monotonic()
         q = gravity_compensation(robot, pin)
         if read_command() is not None:
-            return
+            return measured_state(pin, task, q)
         if cycle % 50 == 0:
             gap = np.linalg.norm(measured_state(pin, task, q) - task.master[0])
             print(
@@ -105,11 +107,19 @@ def measure(robot, pin: AgxPinocchio, task: Task) -> np.ndarray:  # (d,) m, the 
     return measured_state(pin, task, np.array(robot.get_joint_angles().msg))
 
 
-def reset_via(task: Task, y: np.ndarray) -> np.ndarray:
+def reset_via(task: Task, y: np.ndarray, success: bool) -> np.ndarray:
     """(m, d): from the measured y, the master back to its start, kept at y's offset from its
-    nearest sample so a key that ended beside the keyhole withdraws beside it; then the start."""
+    nearest sample so a key that ended beside the keyhole withdraws beside it; then the start.
+
+    After a success the key is in the lock, and the offset is only the push's lag: kept, it
+    tilts the key in the keyhole and jams it. So it fades within one resolvable width.
+    """
     j = int(np.linalg.norm(task.master - y, axis=1).argmin())
-    return np.vstack([task.master[j::-1] + (y - task.master[j]), task.master[:1]])
+    fade = np.ones(j + 1)
+    if success:
+        fade = np.clip(1 - np.arange(j + 1) / (task.sigma_f * (len(task.master) - 1)), 0, 1)
+    back = task.master[j::-1] + np.outer(fade, y - task.master[j])
+    return np.vstack([back, task.master[:1]])
 
 
 def walk(robot, setup: tuple, via: np.ndarray, trial: int, log: dict) -> bool:
@@ -319,14 +329,15 @@ def main(
     try:
         for trial in range(n_trials):
             while not ready:
-                place_arm(robot, pin, task, trial)
-                ready = walk(robot, setup, task.master[:1], trial, log)
+                # Along the master, not straight: the key may still be in the lock.
+                via = reset_via(task, place_arm(robot, pin, task, trial), success=True)
+                ready = walk(robot, setup, via, trial, log)
             hold_start(robot, setup)
             print(f"trial {trial + 1} of {n_trials}, {method}: Enter aborts")
             outcomes.append(run_trial(robot, setup, trial, log))
             print(f"trial {trial + 1}: {outcomes[-1]} after {log['t'][-1]:.1f} s")
             print("  reset: the master back to its start")
-            via = reset_via(task, measure(robot, pin, task))
+            via = reset_via(task, measure(robot, pin, task), outcomes[-1] == "success")
             ready = walk(robot, setup, via, trial, log)
     except KeyboardInterrupt:
         interrupted = True
