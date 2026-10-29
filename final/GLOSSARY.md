@@ -131,6 +131,13 @@ The time from a successful trial's start until the phase last rises past the end
 **Success**:
 A trial that reaches the goal within the time limit: on the arm, the phase passing 0.9, so an opening that stalls below it is a failure; in 2-D, the block reaching the goal, so a slip-out or a dead end is a failure.
 
+**Setback**:
+The phase falling one resolvable width below the highest phase it has reached since the trial's start, or, after an earlier setback, since its next advance; that highest phase is the setback's peak. One long fall is one setback. It is the trace a failed stage leaves in the phase, whichever method ran.
+_Avoid_: failure, retry, fallback
+
+**Recovery**:
+The phase rising past a setback's peak later in the same trial.
+
 **Unassisted success**:
 A success in which the operator never touches the arm during the trial. A trial the operator helped home, such as by wiggling the key the last centimetre in, is assisted, whatever it ended in.
 _Avoid_: good run, clean run
