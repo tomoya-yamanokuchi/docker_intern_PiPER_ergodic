@@ -141,6 +141,7 @@ def main(method: str, n_trials: int) -> None:
     ideal.gravity_scale = np.ones(6)
     operator = Operator(robot, setup[4])
     run_trials.read_command, run_trials.drain_stdin = operator.read, operator.drain
+    run_trials.AUTO = True  # the operator never presses Enter to start a trial
     run_trials.main(robot, setup, method, task_path, n_trials, OUT)
 
 

@@ -121,6 +121,10 @@ _Avoid_: run, episode, attempt
 Consecutive trials in one world at one offset. Only the state and the block are reset between trials. E2T2 hands its statistic on, as it was proposed; the forgetting methods start every trial with a fresh one, so their trials are independent.
 _Avoid_: session, series
 
+**Reset**:
+Putting the door and the arm back between trials, with no hands on the arm: after every trial, the master played back to its start from wherever the arm ended, closing the door and taking the key out. Only a reset that fails needs the operator's hand. It is rig, not method: the law is not stepped during it, so it never enters a statistic.
+_Avoid_: rewind, return, homing
+
 **Time to unlock**:
 The time from a successful trial's start until the phase last rises past the end of the turn, staying past it until the success: the time the insertion and the turn took. A pass the phase falls back from is false progress and does not count, and a failed trial has no time to unlock.
 
