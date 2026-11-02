@@ -21,6 +21,7 @@ from core.agx_pinocchio import AgxPinocchio
 ZMQ_URL = "tcp://127.0.0.1:6000"
 FRAME_LENGTH = 0.012  # m, a drawn tool frame's axes
 POINT_SIZE = 0.004  # m
+PHASE_BAR_LENGTH = 0.1  # m
 
 
 def _server_answers() -> bool:
@@ -96,6 +97,32 @@ def draw_frames(node, p: np.ndarray, rot: np.ndarray, colors: np.ndarray) -> Non
         )
 
 
+def draw_axes(node, length: float = 0.04, radius: float = 0.0015) -> None:
+    """A frame as red, green and blue rods along x, y, z: solid, as meshcat's lines are one
+    pixel wide whatever their width."""
+    # a cylinder stands along y; turn it onto each axis
+    turns = (
+        tf.rotation_matrix(-np.pi / 2, [0, 0, 1]),
+        np.eye(4),
+        tf.rotation_matrix(np.pi / 2, [1, 0, 0]),
+    )
+    for axis, (name, color, turn) in enumerate(
+        zip("xyz", (0xFF0000, 0x00C000, 0x0000FF), turns, strict=True)
+    ):
+        node[name].set_object(g.Cylinder(length, radius), g.MeshLambertMaterial(color=color))
+        node[name].set_transform(tf.translation_matrix(np.eye(3)[axis] * length / 2) @ turn)
+
+
+def draw_path(node, p: np.ndarray, colors: np.ndarray) -> None:
+    """A line one pixel wide through p (n, 3) m, in colours (n, 3)."""
+    node.set_object(
+        g.Line(
+            g.PointsGeometry(p.T.astype(np.float32), colors.T.astype(np.float32)),
+            g.LineBasicMaterial(vertexColors=True),
+        )
+    )
+
+
 def draw_lines(node, a: np.ndarray, b: np.ndarray, color: int = 0x888888) -> None:
     """A segment from each a (n, 3) to its b (n, 3), m."""
     segments = np.stack([a, b], axis=1).reshape(-1, 3)
@@ -112,22 +139,33 @@ def draw_marker(node, color: int, radius: float = 0.008) -> None:
     )
 
 
+def set_camera(viewer: meshcat.Visualizer, offset: np.ndarray) -> None:
+    """The camera at offset (3,) m from the world origin, which it always looks at and orbits:
+    this viewer has no command to move the orbit target, so centre the scene on the origin."""
+    viewer["/Cameras/default"].set_transform(np.eye(4))
+    # the camera hangs in a frame turned +90 deg about x (three.js is y up): world (x, y, z)
+    # is (x, z, -y) there
+    viewer["/Cameras/default/rotated/<object>"].set_property(
+        "position", [float(offset[0]), float(offset[2]), float(-offset[1])]
+    )
+
+
 def place(node, p: np.ndarray) -> None:
     node.set_transform(tf.translation_matrix(p))
 
 
-def draw_phase_bar(node, length: float = 0.2) -> None:
+def draw_phase_bar(node) -> None:
     """A bar whose filled part, set by set_phase_bar, reads the phase from 0 to 1."""
     node["frame"].set_object(
-        g.Box([length, 0.006, 0.006]),
+        g.Box([PHASE_BAR_LENGTH, 0.003, 0.003]),
         g.MeshLambertMaterial(color=0xCCCCCC, opacity=0.4, transparent=True),
     )
-    node["frame"].set_transform(tf.translation_matrix([length / 2, 0, 0]))
-    node["fill"].set_object(g.Box([1.0, 0.01, 0.01]), g.MeshLambertMaterial(color=0xFF8000))
+    node["frame"].set_transform(tf.translation_matrix([PHASE_BAR_LENGTH / 2, 0, 0]))
+    node["fill"].set_object(g.Box([1.0, 0.005, 0.005]), g.MeshLambertMaterial(color=0xFF0000))
 
 
-def set_phase_bar(node, phi: float, length: float = 0.2) -> None:
-    fill = max(phi, 1e-3) * length
+def set_phase_bar(node, phi: float) -> None:
+    fill = max(phi, 1e-3) * PHASE_BAR_LENGTH
     node["fill"].set_transform(
         tf.translation_matrix([fill / 2, 0, 0]) @ np.diag([fill, 1.0, 1.0, 1.0])
     )

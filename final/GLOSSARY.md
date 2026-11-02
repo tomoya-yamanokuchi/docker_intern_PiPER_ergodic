@@ -76,7 +76,7 @@ The region around the master in which a pose is credible for some stage of it: a
 _Avoid_: canal, envelope, corridor
 
 **Front**:
-The phase up to which the sliding target holds datapoints: the current phase plus two resolvable widths.
+The phase up to which the sliding target holds datapoints: the current phase plus two resolvable widths. The expanding target's front is the highest phase reached plus the same.
 
 ## Method
 
@@ -93,6 +93,9 @@ _Avoid_: reference distribution, goal distribution
 
 **Sliding target**:
 A target holding only the datapoints from the phase up to two resolvable widths ahead of it, nothing behind, so it moves along the master as the phase rises or falls.
+
+**Expanding target**:
+A target holding the datapoints from the master's start up to the front of the highest phase reached in the trial, so it only grows. It is run with E2T2's statistic, handed on across the trials of a sequence, but compared only with the part of it recorded at the phases the trial has reached, so the front ahead of them always pulls forward, as if the time spent there were all the time there had been.
 
 **Advance**:
 The phase rising one resolvable width above the lowest phase it has reached since the last advance.

@@ -2,8 +2,8 @@
 """Run the method on the arm: N trials of the locked-door task, one method throughout.
 
 TOUCHES THE ARM. Methods: e2t2 (static target, its statistic handed on across trials, as
-its paper does), sliding (sliding target with forgetting, fresh each trial) and retry
-(sliding with the retry). Every trial starts at the master's start, held there until Enter
+its paper does), expanding (expanding target with E2T2's statistic), sliding (sliding
+target with forgetting, fresh each trial) and retry (sliding with the retry). Every trial starts at the master's start, held there until Enter
 (or for SETTLE s with --auto). After every trial the reset gets it there: the master played
 back to its start from the sample nearest the arm, shifted by the arm's offset from that
 sample, closing the door and taking the key out; then a walk removes the offset. Only a
@@ -222,7 +222,7 @@ def take_answer(answer: tuple, sent: tuple, view, trial: int, log: dict) -> tupl
     """Log and show a step that came back; its walk's step per cycle and twist."""
     y_next, info, step_dt = answer
     t, q, y, tau = sent
-    view.update(q, y_next, info.phi, info.w)
+    view.update(q, info.phi, info.w)
     row = {
         "trial": trial,
         "t": t,
@@ -261,7 +261,6 @@ def run_trial(robot, setup: tuple, trial: int, log: dict) -> str:
     """
     law, impedance, view, pin, task = setup
     law.new_trial()
-    view.new_trial()
     max_lead = MAX_FORCE / impedance.controller.Kc[:3].max()  # m
     t0, cycle, tau = time.monotonic(), 0, np.zeros(6)
     y_cmd = measured_state(pin, task, np.array(robot.get_joint_angles().msg))

@@ -1,4 +1,5 @@
-"""The sequential ergodic law: E2T2 with a sliding target, a forgetting statistic and a retry.
+"""The sequential ergodic law: E2T2 with a sliding target, a forgetting statistic and a retry,
+or with an expanding target and E2T2's own statistic.
 
 The 2-D notebook's law, written for any dimension and run online. Each step takes the
 tool's measured state y in the pose metric and returns the next commanded state, one
@@ -29,10 +30,12 @@ from tt.cross import rect_cross
 from method.pose import MAX_SPEED
 from method.task import N_M, K, Task, coefficients
 
-METHODS = {  # name -> (sliding, forgetting, retry)
-    "e2t2": (False, False, False),
-    "sliding": (True, True, False),
-    "retry": (True, True, True),
+METHODS = {  # name -> (target, forgetting, retry)
+    "e2t2": ("static", False, False),
+    "expanding": ("expanding", False, False),
+    "sliding": ("sliding", True, False),
+    "retry": ("sliding", True, True),
+    "retry_nodecay": ("sliding", False, True),  # the ablation: retry with no forgetting
 }
 FLUSH = 5  # the statistic is rounded every this many steps
 # The offset from the taught environment that must still read as progress (map #1, False
@@ -87,6 +90,14 @@ def sliding_weights(phi, phi_p, delta, rho=0.0):
     return w / w.sum()
 
 
+def expanding_weights(phi_max, phi_p, delta):
+    """(N_P,) of sum 1: the datapoints from the master's start to 2 delta ahead of the highest
+    phase reached, the sliding target's front with no back edge. With E2T2's statistic kept,
+    nothing behind the phase fades, so nothing there draws the law back."""
+    w = 1.0 / (1.0 + np.exp(-(phi_max + 2 * delta - phi_p) / delta))
+    return w / w.sum()
+
+
 @dataclass
 class Statistic:
     lam: float  # forgetting factor per step; 1 is E2T2's time average
@@ -106,6 +117,37 @@ class Statistic:
 
     def W(self) -> tt.vector:
         return self.ttA * (1 / self.Z)
+
+
+class PhasedStatistic:
+    """E2T2's statistic, kept apart per phase bin of width `width`, at the phase each state was
+    recorded at: the expanding target's own, so the law compares its target only with the
+    states recorded at the phases this trial has reached, normalised by the time spent there.
+    Kept whole, the turn and push of the earlier trials would dilute an insertion-only target,
+    and the law would have to stay at the start as long as the whole sequence had lasted. Cut
+    at the target's front instead, an earlier trial's long stall just ahead of the phase reads
+    as covered and pushes the law back; cut at the phase reached, the front has no memory and
+    always pulls forward.
+
+    `phi` and `reached` are set by the law before each add and dot.
+    """
+
+    def __init__(self, dt: float, eps: float, rmax: int, width: float):
+        self.dt, self.eps, self.rmax, self.width = dt, eps, rmax, width
+        self.bins: dict[int, Statistic] = {}
+        self.phi = self.reached = 0.0
+
+    def add(self, phi_rows: np.ndarray) -> None:  # (d, K), the cosines at the state
+        b = int(self.phi / self.width)
+        if b not in self.bins:
+            self.bins[b] = Statistic(1.0, self.dt, self.eps, self.rmax)
+        self.bins[b].add(phi_rows)
+
+    def dot(self, x: tt.vector) -> float:
+        """<W, x> for W the statistic of the bins starting at or below the phase reached; never
+        empty, since the newest state's phase is at most the phase reached."""
+        inside = [s for b, s in self.bins.items() if b * self.width <= self.reached]
+        return sum(tt.dot(s.ttA, x) for s in inside) / sum(s.Z for s in inside)
 
 
 def tube(task: Task, delta: float) -> np.ndarray:  # (N_M + 1, d, d), 1/m^2
@@ -186,7 +228,7 @@ class StepInfo:
 class Law:
     def __init__(self, task: Task, method: str, dt: float):
         self.task, self.dt = task, dt
-        self.sliding, forgetting, self.retry = METHODS[method]
+        self.target, forgetting, self.retry = METHODS[method]
         d = task.datapoints.shape[1]
         self.lam_cores = tt.vector.to_list(sobolev_weights(d))
         self.C = coefficients(task.datapoints, task.h, task.lo, task.L)
@@ -200,11 +242,14 @@ class Law:
         self.stat = None
 
     def new_trial(self) -> None:
-        """A fresh phase and stall; a fresh statistic unless it is E2T2's, which is handed on."""
-        if self.stat is None or self.lam < 1.0:
+        """A fresh phase, stall and highest phase; a fresh statistic unless it is kept, as
+        E2T2's is handed on."""
+        if self.target == "expanding" and self.stat is None:
+            self.stat = PhasedStatistic(self.dt, 1e-4, self.rmax, self.delta / 2)
+        elif self.stat is None or self.target == "sliding":
             self.stat = Statistic(self.lam, self.dt, 1e-4, self.rmax)
         self.filter = PhaseFilter(self.task.master, self.task.s, self.task.h, self.tube)
-        self.lowest, self.stall = np.inf, 0
+        self.lowest, self.stall, self.highest = np.inf, 0, -np.inf
         self.last = None  # the last step: measured state, and the step commanded from it
 
     def lead(self, y: np.ndarray, max_lead: float) -> float:
@@ -224,19 +269,21 @@ class Law:
         return float(np.clip(nominal + length - covered, nominal, max(nominal, max_lead)))
 
     def weights(self, phi: float) -> np.ndarray:  # (N_P,) of sum 1
-        return (
-            sliding_weights(phi, self.task.phi_p, self.delta, self.rho)
-            if self.sliding
-            else self.uniform
-        )
+        if self.target == "sliding":
+            return sliding_weights(phi, self.task.phi_p, self.delta, self.rho)
+        if self.target == "expanding":
+            return expanding_weights(self.highest, self.task.phi_p, self.delta)
+        return self.uniform
 
     def gradient(self, phi_rows: np.ndarray, dphi_rows: np.ndarray, w: np.ndarray) -> np.ndarray:
         """(d,): the gradient of the ergodic metric's Lambda-weighted error at the state."""
-        W, b = self.stat.W(), np.empty(len(phi_rows))
+        W = None if self.target == "expanding" else self.stat.W()
+        b = np.empty(len(phi_rows))
         for i in range(len(phi_rows)):
             rows = [dphi_rows[j] if j == i else phi_rows[j] for j in range(len(phi_rows))]
             cores = [c * r[None, :, None] for c, r in zip(self.lam_cores, rows, strict=True)]
-            b[i] = tt.dot(W, tt.vector.from_list(cores)) - w @ dot_rows(cores, self.C)
+            x = tt.vector.from_list(cores)
+            b[i] = (self.stat.dot(x) if W is None else tt.dot(W, x)) - w @ dot_rows(cores, self.C)
         return b
 
     def step(self, y: np.ndarray, max_lead: float = np.inf) -> tuple[np.ndarray, StepInfo]:
@@ -248,7 +295,7 @@ class Law:
         so a state held there would get no push back in.
         """
         phi = self.filter.update(y)
-        self.lowest = min(self.lowest, phi)
+        self.lowest, self.highest = min(self.lowest, phi), max(self.highest, phi)
         if phi >= self.lowest + self.delta:  # an advance
             self.lowest, self.stall = phi, 0
         else:
@@ -260,6 +307,8 @@ class Law:
         inset = MAX_SPEED * self.dt
         y_measured, y = y, np.clip(y, self.task.lo + inset, hi - inset)
         phi_rows, dphi_rows = basis(y, self.task.lo, self.task.L)
+        if self.target == "expanding":
+            self.stat.phi, self.stat.reached = phi, self.highest
         self.stat.add(phi_rows)
         w = self.weights(phi)
         b = self.gradient(phi_rows, dphi_rows, w)

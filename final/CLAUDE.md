@@ -38,6 +38,7 @@ Deliberate, so a result from one does not carry over unchecked:
 - **Statistic across trials**: the notebook hands it on through a sequence for every
   method; `Law.new_trial` starts a fresh one for every forgetting method, only E2T2's is
   handed on.
+- **The expanding target** exists only in `law.py`; the notebook has no such method.
 - **Retry's retreat rate**: the notebook retreats `delta / T_f` phase per second;
   `law.py` retreats `MAX_SPEED / S_m`, the arm's own speed along the master, and that is
   the method (GLOSSARY "Retry").

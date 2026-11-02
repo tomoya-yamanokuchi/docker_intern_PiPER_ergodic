@@ -24,17 +24,28 @@ from scipy.spatial.transform import Rotation as R
 from core.agx_pinocchio import AgxPinocchio
 from method.law import sliding_weights
 from method.pose import ROTATION_LENGTH, to_metric
-from method.task import Task, cube, kernel_width, phase_label, resample, trim_dwell
-from robot import TCP_FRAME, URDF_PATH, tool_poses
+from method.task import (
+    Task,
+    cube,
+    kernel_width,
+    phase_label,
+    reflected_gaussian,
+    resample,
+    trim_dwell,
+)
+from robot import OUTPUT_DIR, TCP_FRAME, URDF_PATH, tool_poses
 from visualization.scene import (
+    PHASE_BAR_LENGTH,
     colors_of,
+    draw_axes,
     draw_cloud,
     draw_frames,
     draw_lines,
-    draw_marker,
+    draw_path,
     draw_phase_bar,
     open_viewer,
     place,
+    set_camera,
     set_phase_bar,
     show_arm,
 )
@@ -46,6 +57,63 @@ IDLE = 0.01  # s, a drawing thread's poll while nothing is pending
 RUN_FRAME = 0.25  # s between a finished run's frames
 MASTER_FRAMES = 21  # key frames drawn along the master while teaching
 GUIDE_AHEAD = 0.1  # phase the second guide key leads by, so a turn shows before it is due
+# The cloud shows sqrt(density / the frame's peak), so a region at a hundredth of the peak
+# still gets a tenth of its dots; nothing is drawn below this on that scale.
+DENSITY_FLOOR = 0.05
+# Blues from this far up, so the faintest drawn density still shows on the light background;
+# viridis is kept for the phase.
+DENSITY_CMAP, DENSITY_LOW = "Blues", 0.3
+STIPPLE_POINTS = 100_000  # candidate dots in the cube; a frame keeps those the density picks
+STIPPLE_SIZE = 0.003  # m
+# A run view looks at the master from the side, from -y and a little above, so the path and
+# the phase bar both read left to right.
+CAMERA_OFFSET = np.array([0.0, -0.095, 0.03])  # m from the scene's middle; ~55 % of a 16:9 width
+BAR_ABOVE = 0.04  # m, the phase bar over the master's start
+
+
+class TargetDensity:
+    """The target's kernel density, the weighted sum of the datapoints' reflected Gaussians
+    of width h, as a position marginal drawn by stippling: of a fixed set of points uniform
+    in the cube, a frame keeps each with probability its density over the frame's peak, so
+    the dots are as dense as the target.
+
+    Each kernel is a product over axes that each integrate to one over the cube, so the
+    rotation axes drop out. Each point's uniform draw is fixed too, so a frame changes the
+    cloud only where the density changes, and an animation does not flicker.
+    """
+
+    def __init__(self, task: Task):
+        rng = np.random.default_rng(0)
+        lo, L = task.lo[:3], task.L[:3]
+        self.points = lo + L * rng.random((STIPPLE_POINTS, 3))
+        self.u = rng.random(STIPPLE_POINTS)
+        X = task.datapoints
+        self.H = np.ones((STIPPLE_POINTS, len(X)), dtype=np.float32)
+        for i in range(3):
+            self.H *= reflected_gaussian(self.points[:, [i]], X[None, :, i], task.h, lo[i], L[i])
+
+    def draw(self, node, w: np.ndarray) -> None:
+        """The kept points above the floor, coloured by sqrt of their share of the peak."""
+        p = self.H @ w.astype(np.float32)
+        r = np.sqrt(p / p.max())
+        keep = (r > DENSITY_FLOOR) & (self.u < r)
+        colors = colors_of(DENSITY_LOW + (1 - DENSITY_LOW) * r[keep], DENSITY_CMAP)
+        draw_cloud(node, self.points[keep], colors, size=STIPPLE_SIZE)
+
+
+def save_density_legend() -> None:
+    """The density's colour bar as a PNG in final/output, to lay over a recording of a view."""
+    fig = Figure(figsize=(4.0, 0.8), dpi=300, facecolor="white")
+    ax = fig.add_axes((0.05, 0.38, 0.9, 0.32))
+    ramp = colors_of(np.linspace(DENSITY_LOW, 1.0, 256), DENSITY_CMAP)[None]
+    ax.imshow(ramp, aspect="auto", extent=(DENSITY_FLOOR, 1.0, 0.0, 1.0))
+    ax.set_yticks([])
+    shares = np.array([0.01, 0.1, 0.25, 0.5])
+    ax.set_xticks([*np.sqrt(shares), 1.0], [*(f"{x:g}" for x in shares), "peak"])
+    ax.set_title("target density relative to the frame's peak (square-root scale)", fontsize=9)
+    path = OUTPUT_DIR / "density_legend.png"
+    fig.savefig(path, bbox_inches="tight", pad_inches=0.05)
+    print(f"density legend: {path}")
 
 
 def datapoint_rotations(task: Task) -> np.ndarray:  # (N_P, 3, 3)
@@ -101,8 +169,7 @@ def show_master(master: np.ndarray, q_master: np.ndarray, s: np.ndarray) -> None
 
 def show_labels(task: Task) -> None:
     """Datapoints coloured by their label, a line to the master sample each is nearest, and,
-    over the phase, the sliding target's weights (yellow most, dark least) with the arm on
-    the master at that phase."""
+    over the phase, the sliding target's density with the arm on the master at that phase."""
     pin, viewer = AgxPinocchio(str(URDF_PATH)), open_viewer()
     phi_m, P = task.phi_master, task.datapoints[:, :3]
     draw_master(viewer, task.master[:, :3], phi_m)
@@ -112,15 +179,16 @@ def show_labels(task: Task) -> None:
     arm = show_arm(viewer, pin, task.q_master[0])
     _draw_tool(viewer)
 
+    density = TargetDensity(task)
+    save_density_legend()
     phis = np.linspace(0.0, 1.0, PHASE_FRAMES)
     for i, phi in enumerate(phis):
-        w = sliding_weights(phi, task.phi_p, task.sigma_f)
-        draw_cloud(viewer[f"weights/{i}"], P, colors_of(w / w.max()), size=0.006)
-        viewer[f"weights/{i}"].set_property("visible", i == 0)
+        density.draw(viewer[f"density/{i}"], sliding_weights(phi, task.phi_p, task.sigma_f))
+        viewer[f"density/{i}"].set_property("visible", i == 0)
 
     def show_only(frame, i):  # visibility steps between keys, so neighbours need keys alone
         for j in range(max(i - 1, 0), min(i + 2, PHASE_FRAMES)):
-            frame[f"weights/{j}"].set_property("visible", "boolean", j == i)
+            frame[f"density/{j}"].set_property("visible", "boolean", j == i)
 
     qs = task.q_master[np.searchsorted(phi_m, phis).clip(0, len(phi_m) - 1)]
     viewer.set_animation(_animate_arm(viewer, arm, pin, phis, qs, show_only), play=False)
@@ -225,29 +293,24 @@ class TeachingView:
 
 
 class RunView:
-    """A run as it happens: the arm, the commanded pose, the phase as a marker on the master
-    and as a bar, the datapoints coloured by their weight in the target, and the trail."""
+    """A run as it happens, and nothing else: the tool's frame, the phase as a bar, and the
+    target's density."""
 
     def __init__(self, task: Task):
-        self.task = task
         self.pin = AgxPinocchio(str(URDF_PATH))
         self.viewer = open_viewer()
-        draw_master(self.viewer, task.master[:, :3], task.phi_master)
-        self.arm = show_arm(self.viewer, self.pin, task.q_master[0])
-        _draw_tool(self.viewer)
-        draw_marker(self.viewer["phase"], 0xFF8000)
-        draw_marker(self.viewer["command"], 0xFF0000, radius=0.004)
-        bar = self.viewer["phase_bar"]
-        draw_phase_bar(bar)
-        place(bar, task.master[0, :3] + [0.0, 0.0, 0.08])
-        self.pending, self.trail, self.updates = None, [], 0
+        self.root = _centred_scene(self.viewer, task)
+        draw_axes(self.root["tool"])
+        draw_path(self.root["master"], task.master[:, :3], colors_of(task.phi_master))
+        draw_phase_bar(self.root["phase_bar"])
+        place(self.root["phase_bar"], task.master[0, :3] + [0.0, 0.0, BAR_ABOVE])
+        self.density = TargetDensity(task)
+        save_density_legend()
+        self.pending = None
         threading.Thread(target=self._draw, daemon=True).start()
 
-    def new_trial(self) -> None:
-        self.trail, self.updates = [], 0
-
-    def update(self, q: np.ndarray, y_cmd: np.ndarray, phi: float, w: np.ndarray) -> None:
-        self.pending = (q, y_cmd, phi, w)
+    def update(self, q: np.ndarray, phi: float, w: np.ndarray) -> None:
+        self.pending = (q, phi, w)
 
     def _draw(self) -> None:
         while True:
@@ -255,68 +318,51 @@ class RunView:
             if pending is None:
                 time.sleep(IDLE)
                 continue
-            q, y_cmd, phi, w = pending
-            self.arm.display(q)
-            T = _tool_transform(self.pin, q)
-            self.viewer["tool"].set_transform(T)
-            place(self.viewer["command"], y_cmd[:3])
-            place(
-                self.viewer["phase"],
-                [np.interp(phi, self.task.phi_master, m) for m in self.task.master[:, :3].T],
-            )
-            set_phase_bar(self.viewer["phase_bar"], phi)
-            draw_cloud(
-                self.viewer["weights"],
-                self.task.datapoints[:, :3],
-                colors_of(w / w.max()),
-                size=0.006,
-            )
-            self.updates += 1
-            if self.updates % TRAIL_EVERY == 0:
-                self.trail.append(T[:3, 3])
-                draw_cloud(
-                    self.viewer["trail"],
-                    np.array(self.trail),
-                    np.zeros((len(self.trail), 3)),
-                    0.002,
-                )
+            q, phi, w = pending
+            self.root["tool"].set_transform(_tool_transform(self.pin, q))
+            set_phase_bar(self.root["phase_bar"], phi)
+            self.density.draw(self.root["density"], w)
+
+
+def _centred_scene(viewer: meshcat.Visualizer, task: Task):
+    """The node a run view draws under, in world coordinates but shifted so the middle of the
+    master and the phase bar sits on the origin, which the camera looks at and orbits."""
+    bar = task.master[0, :3] + [[0.0, 0.0, BAR_ABOVE], [PHASE_BAR_LENGTH, 0.0, BAR_ABOVE]]
+    p = np.vstack([task.master[:, :3], bar])
+    viewer["run"].set_transform(_translation(-(p.min(axis=0) + p.max(axis=0)) / 2))
+    set_camera(viewer, CAMERA_OFFSET)
+    return viewer["run"]
 
 
 def show_run(task: Task, run: dict, trial: int) -> None:
-    """One trial of a finished run, keyed in seconds: the arm, the phase marker and bar, and
-    the target's weights as they were."""
+    """One trial of a finished run, keyed in seconds: the tool's frame, the phase as a bar,
+    and the target's density as it was."""
     pin, viewer = AgxPinocchio(str(URDF_PATH)), open_viewer()
     mine = run["trial"] == trial
     t, q, phi, w = run["t"][mine], run["q"][mine], run["phi"][mine], run["w"][mine]
     pick = np.searchsorted(t, np.arange(0.0, t[-1], RUN_FRAME))
-    draw_master(viewer, task.master[:, :3], task.phi_master)
-    arm = show_arm(viewer, pin, q[0])
-    _draw_tool(viewer)
-    draw_marker(viewer["phase"], 0xFF8000)
-    draw_phase_bar(viewer["phase_bar"])
-    place(viewer["phase_bar"], task.master[0, :3] + [0.0, 0.0, 0.08])
-    draw_cloud(viewer["trail"], tool_poses(pin, q[::5])[0], np.zeros((len(q[::5]), 3)), 0.002)
+    root = _centred_scene(viewer, task)
+    draw_axes(root["tool"])
+    draw_path(root["master"], task.master[:, :3], colors_of(task.phi_master))
+    draw_phase_bar(root["phase_bar"])
+    place(root["phase_bar"], task.master[0, :3] + [0.0, 0.0, BAR_ABOVE])
+    density = TargetDensity(task)
+    save_density_legend()
     for i, k in enumerate(pick):
-        draw_cloud(
-            viewer[f"weights/{i}"], task.datapoints[:, :3], colors_of(w[k] / w[k].max()), size=0.006
-        )
-        viewer[f"weights/{i}"].set_property("visible", i == 0)
+        density.draw(root[f"density/{i}"], w[k])
+        root[f"density/{i}"].set_property("visible", i == 0)
 
-    def per_frame(frame, i):
-        k = pick[i]
-        frame["phase"].set_transform(
-            _translation([np.interp(phi[k], task.phi_master, m) for m in task.master[:, :3].T])
-        )
-        fill = max(phi[k], 1e-3) * 0.2
-        frame["phase_bar/fill"].set_transform(
-            _translation([fill / 2, 0, 0]) @ np.diag([fill, 1.0, 1.0, 1.0])
-        )
-        for j in range(max(i - 1, 0), min(i + 2, len(pick))):
-            frame[f"weights/{j}"].set_property("visible", "boolean", j == i)
-
-    viewer.set_animation(
-        _animate_arm(viewer, arm, pin, t[pick], q[pick], per_frame), repetitions=math.inf
-    )
+    animation = Animation(default_framerate=1)
+    for i, k in enumerate(pick):
+        with animation.at_frame(viewer, t[k]) as frame:
+            frame["run/tool"].set_transform(_tool_transform(pin, q[k]))
+            # an animation keys position and rotation only, so the fill's length is keyed apart
+            fill = max(phi[k], 1e-3) * PHASE_BAR_LENGTH
+            frame["run/phase_bar/fill"].set_transform(_translation([fill / 2, 0, 0]))
+            frame["run/phase_bar/fill"].set_property("scale", "vector3", [fill, 1.0, 1.0])
+            for j in range(max(i - 1, 0), min(i + 2, len(pick))):
+                frame[f"run/density/{j}"].set_property("visible", "boolean", j == i)
+    viewer.set_animation(animation, repetitions=math.inf)
 
 
 def _translation(p) -> np.ndarray:
@@ -341,4 +387,4 @@ def plot_run(run: dict, path: Path) -> None:
         ax.legend(loc="upper left")
     ax.set_xlabel("t (s)")
     fig.tight_layout()
-    fig.savefig(path)
+    fig.savefig(path, bbox_inches="tight", pad_inches=0.05)
