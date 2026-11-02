@@ -31,7 +31,8 @@ at the measured pose, not where the last one ended, keeps the commanded velocity
 law's own, so the friction feedforward always has the law's direction, even when the arm
 lags. A lead grows only until the spring pushes with MAX_FORCE.
 
-Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry> task_<ts>.npz [n_trials] [--auto]
+Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry> task_<ts>.npz [n_trials] [--auto] [--out=DIR]
+The runs go to DIR (made if missing), default final/output/evaluation.
 """
 
 import multiprocessing
@@ -357,10 +358,12 @@ def main(
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--auto"]
+    args = [a for a in sys.argv[1:] if a != "--auto" and not a.startswith("--out=")]
+    out = [Path(a[len("--out=") :]) for a in sys.argv if a.startswith("--out=")]
     method, task_path = args[0], Path(args[1])
     if method not in METHODS:
         sys.exit(f"method must be one of {', '.join(METHODS)}")
     setup = prepare(method, task_path)
     AUTO = "--auto" in sys.argv
-    main(connect_arm(), setup, method, task_path, int(args[2]) if len(args) > 2 else 1)
+    n_trials = int(args[2]) if len(args) > 2 else 1
+    main(connect_arm(), setup, method, task_path, n_trials, *out)
