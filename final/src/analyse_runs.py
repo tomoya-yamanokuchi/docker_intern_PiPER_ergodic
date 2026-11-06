@@ -18,7 +18,8 @@ index in the sequence.
                             width / trials with a setback
   resets                    failed walks / walks
 
-Fractions carry a Wilson 95 % interval.
+Fractions carry a Wilson 95 % interval. Every other method's success rate is tested against
+REFERENCE's with Fisher's exact test, two-sided and uncorrected for the number of methods.
 
 Run from final/src:  sh run.sh analyse_runs.py run_<method>_<ts>.npz ...
 """
@@ -29,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib.figure import Figure
+from scipy.stats import fisher_exact
 
 from method.task import Task
 
@@ -36,15 +38,21 @@ COUNTED = ("success", "limit", "abort")
 TURN_END = 0.50  # phase; on the door master the key has turned 43 of its 47 deg by here
 TIME_LIMIT = 600.0  # s, a trial's on the arm
 Z = 1.96  # 95 %
+REFERENCE = "retry"  # the full method; each ablation and baseline is tested against it
+
+
+def wilson_interval(k: int, n: int) -> tuple[float, float]:
+    p, z2 = k / n, Z**2 / n
+    centre = (p + z2 / 2) / (1 + z2)
+    half = Z * np.sqrt(p * (1 - p) / n + z2 / (4 * n)) / (1 + z2)
+    return centre - half, centre + half
 
 
 def wilson(k: int, n: int) -> str:
     if n == 0:
         return "-"
-    p, z2 = k / n, Z**2 / n
-    centre = (p + z2 / 2) / (1 + z2)
-    half = Z * np.sqrt(p * (1 - p) / n + z2 / (4 * n)) / (1 + z2)
-    return f"{k}/{n} = {p:.2f}  [{centre - half:.2f}, {centre + half:.2f}]"
+    lo, hi = wilson_interval(k, n)
+    return f"{k}/{n} = {k / n:.2f}  [{lo:.2f}, {hi:.2f}]"
 
 
 def spread(values: list[float]) -> str:
@@ -132,6 +140,20 @@ def report(method: str, ts: list[dict], walks: np.ndarray) -> None:
     )
 
 
+def compare(per_method: dict) -> None:
+    if REFERENCE not in per_method:
+        return
+    ref = per_method[REFERENCE]
+    k0 = sum(t["outcome"] == "success" for t in ref)
+    print(f"\nsuccess rate against {REFERENCE} ({k0}/{len(ref)}), Fisher's exact test, two-sided")
+    for method, ts in per_method.items():
+        if method == REFERENCE:
+            continue
+        k = sum(t["outcome"] == "success" for t in ts)
+        _, p = fisher_exact([[k0, len(ref) - k0], [k, len(ts) - k]])
+        print(f"  {method:14s} {k}/{len(ts)}  p = {p:.2g}")
+
+
 def plot_survival(per_method: dict, path: Path) -> None:
     """The fraction of trials not yet a success, against time, per method."""
     fig = Figure(figsize=(6, 4))
@@ -155,6 +177,7 @@ def main(paths: list[Path]) -> None:
             walks[str(run["method"])] += list(run["reset_done"])
     for method, ts in per_method.items():
         report(method, ts, np.array(walks[method]).reshape(-1, 3))
+    compare(per_method)
     plot = paths[0].with_name("survival.png")
     plot_survival(per_method, plot)
     print(f"\nsurvival curve in {plot}")
