@@ -6,7 +6,8 @@ its paper does), expanding (expanding target with E2T2's statistic), sliding (sl
 target with forgetting, fresh each trial) and retry (sliding with the retry). Every trial starts at the master's start, held there until Enter
 (or for SETTLE s with --auto). After every trial the reset gets it there: the master played
 back to its start from the sample nearest the arm, shifted by the arm's offset from that
-sample, closing the door and taking the key out; then a walk removes the offset. Only a
+sample, closing the door and taking the key out; then the task's closing trajectory, if it has
+one (the cover of the covered peg-in-hole); then a walk removes the offset. Only a
 run that starts away from the master's start, or a reset that fails, needs the operator:
 the arm is backdrivable; close the door, and either press Enter with the key still in the
 lock, or take it out and put the arm near the master's start (the distance is printed)
@@ -110,7 +111,8 @@ def measure(robot, pin: AgxPinocchio, task: Task) -> np.ndarray:  # (d,) m, the 
 
 def reset_via(task: Task, y: np.ndarray, success: bool) -> np.ndarray:
     """(m, d): from the measured y, the master back to its start, kept at y's offset from its
-    nearest sample so a key that ended beside the keyhole withdraws beside it; then the start.
+    nearest sample so a key that ended beside the keyhole withdraws beside it; then the
+    task's closing trajectory, if it has one; then the start.
 
     After a success the key is in the lock, and the offset is only the push's lag: kept, it
     tilts the key in the keyhole and jams it. So it fades within one resolvable width.
@@ -120,7 +122,7 @@ def reset_via(task: Task, y: np.ndarray, success: bool) -> np.ndarray:
     if success:
         fade = np.clip(1 - np.arange(j + 1) / (task.sigma_f * (len(task.master) - 1)), 0, 1)
     back = task.master[j::-1] + np.outer(fade, y - task.master[j])
-    return np.vstack([back, task.master[:1]])
+    return np.vstack([back, task.closing.reshape(-1, back.shape[1]), task.master[:1]])
 
 
 def walk(robot, setup: tuple, via: np.ndarray, trial: int, log: dict) -> bool:

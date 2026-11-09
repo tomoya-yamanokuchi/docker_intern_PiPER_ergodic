@@ -6,7 +6,7 @@ sample, the cube spanning the data, and the kernel width chosen by leave-one-out
 likelihood. It needs the recordings only, never the arm.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -102,6 +102,9 @@ class Task:
     lo: np.ndarray  # (d,) m, the cube's low corner
     L: np.ndarray  # (d,) m, its sides
     h: float  # m, the kernel width
+    # (N_M + 1, d) m, a taught motion from the master's start that resets the fixture, such as
+    # pushing a cover shut: part of the reset, never of the method. Empty for the door.
+    closing: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
 
     @property
     def S_m(self) -> float:  # m, the master's length
@@ -125,11 +128,15 @@ class Task:
             return cls(**{k: f[k] for k in f.files})
 
 
-def label(y_master, q_master, y_datapoints, q_datapoints, R0) -> Task:
-    """The task from the master (n, d) and the datapoints (N_P, d) in the metric, with their q."""
+def label(y_master, q_master, y_datapoints, q_datapoints, R0, y_closing=None) -> Task:
+    """The task from the master (n, d) and the datapoints (N_P, d) in the metric, with their q,
+    and the closing trajectory (n_c, d) if the fixture has one."""
     keep = trim_dwell(y_master)
     master, q_m, s = resample(y_master[keep], q_master[keep])
     lo, L = cube(np.vstack([master, y_datapoints]))
     h = kernel_width(y_datapoints, lo, L)
     phi_p = phase_label(y_datapoints, master, s / s[-1])
-    return Task(R0, master, q_m, s, y_datapoints, q_datapoints, phi_p, lo, L, h)
+    task = Task(R0, master, q_m, s, y_datapoints, q_datapoints, phi_p, lo, L, h)
+    if y_closing is not None:
+        task.closing = resample(y_closing[trim_dwell(y_closing)])[0]
+    return task
