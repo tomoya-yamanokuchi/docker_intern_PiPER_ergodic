@@ -1,6 +1,7 @@
 """Arm I/O, the only code in final/ that talks to pyAgxArm: connect, read, command, hold."""
 
 import contextlib
+import sys
 import time
 
 import numpy as np
@@ -12,12 +13,20 @@ from controller.feed_forward import FIRMWARE
 # profiles scale t_ff differently, so the wrong one mis-scales joints 1-3. `--fw` is
 # parsed in controller.feed_forward, which holds the per-arm constants.
 
+# Two arms run at once on two adapters, so `--can <interface>` picks the bus; removed from
+# sys.argv at import, as `--fw` is, so each script's positional argv is unchanged.
+CHANNEL = "can0"
+if "--can" in sys.argv:
+    i = sys.argv.index("--can")
+    CHANNEL = sys.argv[i + 1]
+    del sys.argv[i : i + 2]
+
 
 def connect_arm():
     cfg = create_agx_arm_config(
         robot=ArmModel.PIPER,
         firmeware_version={"DEFAULT": PiperFW.DEFAULT, "V183": PiperFW.V183}[FIRMWARE],
-        channel="can0",
+        channel=CHANNEL,
     )
     robot = AgxArmFactory.create_arm(cfg)
     robot.connect()
