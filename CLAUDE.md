@@ -647,8 +647,10 @@ nothing to fix in Python.
 `1d50:606f`, "bytewerk candleLight USB to CAN adapter", USB Full Speed. It
 reports as a stock candleLight even though the bench calls it an AgileX
 USB-CAN-HL; the gs_usb binding is correct. **It is single-channel**: USB
-interface `1.0` is the CAN engine and creates `can0`, `1.1` is DFU, and there is
-no `can1`. The stock design's 120 Ω termination is an optional solder jumper,
+interface `1.0` is the CAN engine and creates one `canN`, `1.1` is DFU. A second
+`can1` exists only with a second adapter plugged in, and the names follow plug-in
+order. Since 2026-11-12 two adapters drive two arms at once; `final/src` scripts take
+`--can <interface>` (default `can0`). The stock design's 120 Ω termination is an optional solder jumper,
 often left unpopulated, which matters at 1 Mbit/s. With power off, resistance
 across CAN-H/CAN-L reads ~60 Ω with both ends terminated, ~120 Ω with one, open
 for a broken wire, ~0 Ω for a short.
@@ -656,24 +658,27 @@ for a broken wire, ~0 Ω for a short.
 | serial | status |
 |---|---|
 | `0047001D5246570520323934` | **working** |
-| `004C00404148571420343133` | **DEAD — do not put back in service** |
+| `004C00404148571420343133` | **working again** (2026-11-12, user report) |
 
-The dead unit died overnight with the arm left powered and the host PC off. It
-enumerated and configured `can0` cleanly but never moved a frame; swapping in the
-second unit restored communication immediately. **LED as a field indicator:**
-the dead unit showed a constant purple LED, the working one varies green/white.
-The signal is constant-versus-varying, not hue.
+The second unit once failed overnight, with the arm left powered and the host PC
+off. It enumerated and configured `can0` cleanly but never moved a frame, and
+swapping in the first unit restored communication immediately. On 2026-11-12 the
+user put it back in service on the second arm, and it worked. So the failure was
+temporary, not a dead unit, and its cause is unknown. **LED as a field
+indicator:** in the failed state it showed a constant purple LED, while a working
+unit's LED varies green and white. The signal is constant versus varying, not hue.
 
 **Diagnostic shortcut: if CAN worked before and broke across a host power-down
-with the arm left on, swap the adapter before measuring anything.** Screw
-terminals do not fail spontaneously on an untouched bench.
+with the arm left on, swap or re-plug the adapter before measuring anything.**
+Screw terminals do not fail spontaneously on an untouched bench.
 
 **Habit: shut the arm down before the PC, or unplug the CAN adapter.** The
 adapter is USB-bus-powered, so the exposure is "adapter connected but unpowered
 while the bus is driven"; breaking either half removes it. **The mechanism is
-inferred, not established** — one death, one night, a correlation, and CAN
-transceivers are normally specified to tolerate exactly this. Treat it as cheap
-insurance; a second death under the same conditions would be real evidence.
+inferred, not established**: one failure, one night, a correlation, and the
+unit recovered, while CAN transceivers are normally specified to tolerate exactly
+this. Treat the habit as cheap insurance. A second failure under the same
+conditions would be real evidence.
 
 ---
 
