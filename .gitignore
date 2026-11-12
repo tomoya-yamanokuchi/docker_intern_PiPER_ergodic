@@ -6,6 +6,10 @@ __pycache__/
 *$py.class
 *.so
 
+.claude/
+.git/
+report/
+
 # Python environments
 .venv/
 venv/
@@ -61,6 +65,9 @@ temp/
 
 # Weekly progress reports (LaTeX), kept out of the code history
 weekly_reports/
+final/
+handoff/
+pictures/
 
 # Uncomment these if generated figures/videos should NOT be versioned.
 # figures/

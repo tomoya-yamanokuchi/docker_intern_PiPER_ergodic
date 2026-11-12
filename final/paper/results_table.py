@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""The door experiment's results table for the paper, from the counted run files. Hardware-free.
+"""The door experiment's results table and survival figure for the paper, from the counted run
+files. Hardware-free.
 
-Writes results_table.tex beside this file: per condition the trials, the success rate with its
-Wilson 95 % interval, Fisher's exact test (two-sided, uncorrected) against Ours, and the
-completion time of the successes.
+Writes results_table.tex beside this file and img/survival.pdf: per condition the trials, the
+six metrics of analyse_runs.py, each fraction with its Wilson 95 % interval, and the survival
+curve of every counted trial.
 
 Run from final/src (the run files name their task relative to it):
     sh run.sh ../paper/results_table.py
@@ -12,68 +13,75 @@ Run from final/src (the run files name their task relative to it):
 from pathlib import Path
 
 import numpy as np
-from scipy.stats import fisher_exact
 
-from analyse_runs import TIME_LIMIT, trials, wilson_interval
+from analyse_runs import plot_survival, trials, wilson_interval
 
-RUNS = Path(__file__).resolve().parents[1] / "output"
+PAPER = Path(__file__).resolve().parent
+RUNS = PAPER.parent / "output"
 # (name in the paper, method stored in the files, run directories). Listed rather than grouped
-# by method, because E2T2 w/o memory is e2t2 run as one-trial sequences in its own directory.
+# by method, because the single-trial baseline is e2t2 run as one-trial sequences in its own
+# directory.
 CONDITIONS = [
-    ("Ours", "retry", ["evaluation", "evaluation_retry"]),
+    ("Full target distribution", "e2t2", ["evaluation", "evaluation_e2t2"]),
+    ("Full target distribution (single trial)", "e2t2", ["evaluation_nomemory"]),
+    ("Monotonic expansion", "expanding", ["evaluation_expanding"]),
     ("Ours w/o Retreat", "sliding", ["evaluation_sliding"]),
     ("Ours w/o Visitation Decay", "retry_nodecay", ["evaluation_retry_nodecay"]),
-    ("E2T2", "e2t2", ["evaluation", "evaluation_e2t2"]),
-    ("E2T2 w/o memory", "e2t2", ["evaluation_nomemory"]),
-    ("Monotonic expansion", "expanding", ["evaluation_expanding"]),
+    ("Ours", "retry", ["evaluation", "evaluation_retry"]),
 ]
 
 
-def successes(method: str, dirs: list[str]) -> tuple[int, list[float]]:
-    """(counted trials, completion times in s of the successes); `_2` keeps retry off retry_nodecay."""
-    ts = [
+def counted(method: str, dirs: list[str]) -> list[dict]:
+    """The counted trials; `_2` keeps retry off retry_nodecay."""
+    return [
         t for d in dirs for p in sorted((RUNS / d).glob(f"run_{method}_2*.npz")) for t in trials(p)
     ]
-    return len(ts), [t["time"] for t in ts if t["outcome"] == "success"]
 
 
-def p_value(p: float) -> str:
-    if p >= 1e-3:
-        return f"{p:.3f}"
-    mantissa, exponent = f"{p:.1e}".split("e")
-    return rf"${mantissa}\times10^{{{int(exponent)}}}$"
-
-
-def row(name: str, n: int, times: list[float], ref: tuple[int, int] | None) -> str:
-    k = len(times)
+def fraction(k: int, n: int) -> str:
     lo, hi = wilson_interval(k, n)
-    p = "--" if ref is None else p_value(fisher_exact([list(ref), [k, n - k]])[1])
-    q1, med, q3 = np.percentile(times, [25, 50, 75])
-    return (
-        rf"{name} & {n} & {k / n:.2f} [{lo:.2f}, {hi:.2f}] & {p} & "
-        rf"{med:.0f} [{q1:.0f}, {q3:.0f}] \\"
-    )
+    # Top-aligned, so the count sits on the condition name's line.
+    return rf"\begin{{tabular}}[t]{{@{{}}c@{{}}}}${k}/{n}$\\{k / n:.2f} [{lo:.2f}, {hi:.2f}]\end{{tabular}}"
+
+
+def row(name: str, ts: list[dict]) -> str:
+    n = len(ts)
+    wins = [t for t in ts if t["outcome"] == "success"]
+    backs = [(t, rec) for t in ts for _, rec in t["setbacks"]]
+    recovered = [t["outcome"] == "success" for t, rec in backs if rec]
+    with_backs = [t for t in ts if t["setbacks"]]
+    q1, med, q3 = np.percentile([t["time"] for t in wins], [25, 50, 75])
+    cells = [
+        rf"\textbf{{{name}}}" if name == "Ours" else name,
+        str(n),
+        fraction(len(wins), n),
+        fraction(sum(t["outcome"] != "success" for t in ts), n),
+        rf"\begin{{tabular}}[t]{{@{{}}c@{{}}}}{med:.0f}\\{{}}[{q1:.0f}, {q3:.0f}]\end{{tabular}}",
+        fraction(sum(rec for _, rec in backs), len(backs)),
+        fraction(sum(recovered), len(recovered)),
+        fraction(sum(t["repeated"] for t in with_backs), len(with_backs)),
+    ]
+    return " & ".join(cells) + r" \\"
 
 
 def main() -> None:
-    rows, ref = [], None
-    for name, method, dirs in CONDITIONS:
-        n, times = successes(method, dirs)
-        rows.append(row(name, n, times, ref))
-        if ref is None:  # the first condition is Ours
-            ref = (len(times), n - len(times))
+    per_condition = {name: counted(method, dirs) for name, method, dirs in CONDITIONS}
+    rows = [row(name, ts) for name, ts in per_condition.items()]
     table = "\n".join(
         [
-            r"\begin{table*}[t]",  # both columns: the table is about 400 pt wide, a column 252 pt
+            r"\begin{table*}[t]",
             r"\centering",
-            r"\caption{Door task, per condition: success rate with its Wilson 95\,\% interval,"
-            r" Fisher's exact test of the success rate against Ours (two-sided, uncorrected), and"
-            r" completion time of the successful trials. A trial fails at the"
-            rf" {TIME_LIMIT:.0f}\,s limit.}}",
+            r"\caption{Door task, per condition: count and rate with its Wilson 95\,\% interval for"
+            r" each fraction, and the median [IQR] completion time of the successful trials."
+            r" Metrics are defined in Table~\ref{tab:metrics}.}",
             r"\label{tab:results}",
-            r"\begin{tabular}{lcccc}",
+            r"\footnotesize",
+            r"\setlength{\tabcolsep}{3pt}",
+            r"\begin{tabular}{>{\raggedright\arraybackslash}p{2.6cm}ccccccc}",
             r"\toprule",
-            r"Condition & $n$ & Success [95\,\% CI] & $p$ vs Ours & $t_\mathrm{c}$ (s), median [IQR] \\",
+            r"Condition & $n$ & Success & Failure & $t_\mathrm{c}$ (s) & Recovery"
+            r" & Post-recovery & Repeated \\",
+            r" & & rate & rate & & rate & progress rate & failure rate \\",
             r"\midrule",
             *rows,
             r"\bottomrule",
@@ -81,10 +89,11 @@ def main() -> None:
             r"\end{table*}",
         ]
     )
-    out = Path(__file__).with_name("results_table.tex")
+    out = PAPER / "results_table.tex"
     out.write_text(table + "\n")
+    plot_survival(per_condition, PAPER / "img" / "survival.pdf")
     print(table)
-    print(f"\nwritten to {out}")
+    print(f"\nwritten to {out} and {PAPER / 'img' / 'survival.pdf'}")
 
 
 if __name__ == "__main__":

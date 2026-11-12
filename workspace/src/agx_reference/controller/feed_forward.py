@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 
 from core.agx_pinocchio import AgxPinocchio, helper
@@ -69,11 +71,36 @@ from core.agx_pinocchio import AgxPinocchio, helper
 # Joint 1 also carries a steady offset, about 0.088 N*m over the same four poses,
 # but the model gives joint 1 zero gravity torque and is right to: its axis is
 # vertical. That one is not gravity and is left alone.
-GRAVITY_SCALE = np.array([1.0, 1.078, 1.0, 1.0, 1.0, 1.0])  # (6,) x the modelled gravity
+# The constants below are per arm, and the firmware profile identifies the arm: DEFAULT is
+# the S-V1.8-2 arm the comments above describe, V183 the S-V1.8-6 arm. Chosen by
+# `--fw <profile>`, read here at import and removed from sys.argv so each script's
+# positional argv is unchanged; arm/executor code imports FIRMWARE from here.
+FIRMWARE = "DEFAULT"
+if "--fw" in sys.argv:
+    i = sys.argv.index("--fw")
+    FIRMWARE = sys.argv[i + 1]
+    del sys.argv[i : i + 2]
+
+# S-V1.8-6 arm: one identify_friction.py run (friction_20261021_200117.npz), two poses,
+# so far less pooled than the DEFAULT set. Joint 6 is below the noise floor again. Its
+# gravity model is not measured, so GRAVITY_SCALE stays 1; joint 2's directional offset
+# there (about 0.09 N*m) is half the other arm's, so 1.078 would over-correct. Viscous and
+# Stribeck are the other arm's: joint 1 climbs with speed (0.48 to 1.0 N*m over
+# 0.03-0.5 rad/s) but the viscous fit did not repeat on the other arm either.
+GRAVITY_SCALE = {  # (6,) x the modelled gravity
+    "DEFAULT": np.array([1.0, 1.078, 1.0, 1.0, 1.0, 1.0]),
+    "V183": np.ones(6),
+}[FIRMWARE]
 
 FRICTION_VISCOUS = np.zeros(6)  # (6,) N*m*s/rad
-FRICTION_COULOMB = np.array([0.391, 0.531, 0.498, 0.086, 0.094, 0.052])  # (6,) N*m
-FRICTION_STATIC = np.array([1.059, 1.132, 1.038, 0.17, 0.10, 0.172])  # (6,) N*m
+FRICTION_COULOMB = {  # (6,) N*m
+    "DEFAULT": np.array([0.391, 0.531, 0.498, 0.086, 0.094, 0.052]),
+    "V183": np.array([0.6593, 0.4204, 0.5258, 0.064, 0.0829, 0.0288]),
+}[FIRMWARE]
+FRICTION_STATIC = {  # (6,) N*m
+    "DEFAULT": np.array([1.059, 1.132, 1.038, 0.17, 0.10, 0.172]),
+    "V183": np.array([1.0035, 0.9501, 1.2284, 0.1833, 0.173, 0.1782]),
+}[FIRMWARE]
 STRIBECK_VELOCITY = np.array([0.005, 0.005, 0.005, 0.005, 0.005, 0.005])  # (6,) rad/s
 
 

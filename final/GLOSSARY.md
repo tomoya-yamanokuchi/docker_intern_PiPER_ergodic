@@ -13,6 +13,10 @@ The 2-D sequential task: insert the peg tip into the slot of a block from above,
 **Locked door**:
 The 6-DoF sequential task on the arm: insert the key into the lock, turn it to unlock, then push the door open.
 
+**Covered peg-in-hole**:
+The second 6-DoF sequential task on the arm: the peg pushes a gravity-loaded cover open (opening the cover), and only then can it enter the hole beneath (insertion).
+_Avoid_: peg-in-covered-hole
+
 **Tool**:
 What the arm holds and moves through the task: the peg or the key.
 
@@ -125,8 +129,12 @@ Consecutive trials in one world at one offset. Only the state and the block are 
 _Avoid_: session, series
 
 **Reset**:
-Putting the door and the arm back between trials, with no hands on the arm: after every trial, the master played back to its start from wherever the arm ended, closing the door and taking the key out. Only a reset that fails needs the operator's hand. It is rig, not method: the law is not stepped during it, so it never enters a statistic.
+Putting the door and the arm back between trials, with no hands on the arm: after every trial, the master played back to its start from wherever the arm ended, closing the door and taking the key out. Only a reset that fails needs the operator's hand. It is rig, not method: the law is not stepped during it, so it never enters a statistic. On the covered peg-in-hole the master is followed by the closing trajectory.
 _Avoid_: rewind, return, homing
+
+**Closing trajectory**:
+A taught motion from the master's start that pushes the cover of the covered peg-in-hole shut. Part of the reset, never of the method.
+_Avoid_: reset trajectory, reverse master
 
 **Time to unlock**:
 The time from a successful trial's start until the phase last rises past the end of the turn, staying past it until the success: the time the insertion and the turn took. A pass the phase falls back from is false progress and does not count, and a failed trial has no time to unlock.
@@ -144,3 +152,24 @@ The phase rising past a setback's peak later in the same trial.
 **Unassisted success**:
 A success in which the operator never touches the arm during the trial. A trial the operator helped home, such as by wiggling the key the last centimetre in, is assisted, whatever it ended in.
 _Avoid_: good run, clean run
+
+## Paper
+
+The paper names some concepts differently from the code; the code keeps the names above.
+
+**Sequential Ergodic Control**:
+The method in the paper (retry in the code), "Ours" in tables. A working name.
+_Avoid_: sequential ergodic retry
+
+**Expert trajectory**:
+The paper's name for the master; its samples are expert samples.
+
+**Retreat**:
+The paper's name for retry as a component, the back edge moving backwards during a stall; "retry" stays a verb for what the arm does.
+
+**Visitation decay**:
+The paper's name for the statistic forgetting with the forgetting horizon; the statistic is the decaying statistic.
+_Avoid_: forgetting (in the paper)
+
+**Full target distribution**:
+The paper's name for the E2T2 condition, since it is a reimplementation with kernel targets; E2T2 is only the cited method.

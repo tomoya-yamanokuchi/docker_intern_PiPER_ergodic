@@ -68,7 +68,11 @@ MAX_FORCE = 5.0  # N, the most the spring may push the key with
 RESET_FORCE = 15.0
 TIME_LIMIT = 600.0  # s, a trial's
 SUCCESS_PHASE = 0.9
-RESET_LIMIT = 60.0  # s, a walk's; the whole master at full speed takes about 16 s
+# s, a walk's: at least RESET_LIMIT, else RESET_SLACK times the walk at full speed, so a long
+# reset (the covered peg-in-hole's master plus closing trajectory, ~60 s) is not cut short.
+# The door's whole master at full speed takes about 16 s.
+RESET_LIMIT = 60.0
+RESET_SLACK = 4.0
 SETTLE = 2.0  # s, the hold at the master's start before an automatic trial
 AUTO = False  # --auto: start every trial after SETTLE, not on Enter
 # Every arm run lands here, so the experiment is one glob; simulate.py writes to its own.
@@ -127,7 +131,7 @@ def reset_via(task: Task, y: np.ndarray, success: bool) -> np.ndarray:
 
 def walk(robot, setup: tuple, via: np.ndarray, trial: int, log: dict) -> bool:
     """Walk the commanded pose from the measured one through via; True once the arm is
-    within TOLERANCE of via's end, False at RESET_LIMIT.
+    within TOLERANCE of via's end, False at the walk's limit.
 
     The commanded pose waits while the arm lags it by more than the lead at which the
     spring pulls with RESET_FORCE. The law is not stepped.
@@ -135,8 +139,9 @@ def walk(robot, setup: tuple, via: np.ndarray, trial: int, log: dict) -> bool:
     _, impedance, _, pin, task = setup
     max_lead = RESET_FORCE / impedance.controller.Kc[:3].max()  # m
     path = walk_path(measure(robot, pin, task), via)
+    limit = max(RESET_LIMIT, RESET_SLACK * len(path) / CONTROL_FREQ_HZ)
     t0, i, done = time.monotonic(), 0, False
-    while not done and (t := time.monotonic() - t0) < RESET_LIMIT:
+    while not done and (t := time.monotonic() - t0) < limit:
         start = time.monotonic()
         q = np.array(robot.get_joint_angles().msg)
         y = measured_state(pin, task, q)

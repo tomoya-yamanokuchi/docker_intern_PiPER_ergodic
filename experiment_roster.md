@@ -79,6 +79,57 @@ Add 2 one-trial `e2t2` runs (`e2t2 ... 1 --auto --fw V183 --out=../output/evalua
 | 5 | 2026-11-05 | expanding: `evaluation_expanding/run_expanding_20261105_142819`; retry: `evaluation_retry/run_retry_20261105_145025`; sliding: `evaluation_sliding/run_sliding_20261105_155450`; e2t2: `evaluation_e2t2/run_e2t2_20261105_183357`; retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261105_185721`; e2t2 1-trial x2: `evaluation_nomemory/run_e2t2_20261105_191236`, `run_e2t2_20261105_191509` | expanding: success, limit, success, success; resets ok. retry: limit, success, success, success; resets ok. sliding: 4 limits; the resets after trials 1 and 3 hit the 60 s limit (same as session 4's sliding). e2t2 (18:33, after a break): 4 limits, the first all-limit e2t2 sequence; resets ok, but the first walk to the start took 4.2 s (usually 0.5 s). retry_nodecay: limit, success, success, success; resets ok (the one after trial 1 took 0.5 s). e2t2 1-trial x2: limit, success; resets ok. Done. |
 | 6 | 2026-11-06 | retry: `evaluation_retry/run_retry_20261106_094345`; retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261106_102433`; sliding: `evaluation_sliding/run_sliding_20261106_132642`; e2t2: `evaluation_e2t2/run_e2t2_20261106_141155`; expanding: `evaluation_expanding/run_expanding_20261106_144502`; e2t2 1-trial: `evaluation_nomemory/run_e2t2_20261106_145522` | retry: success, success, success, limit (successes slow: 584, 540, 231 s); resets ok. retry_nodecay: limit, limit, success (520 s), limit; resets ok. sliding: 4 limits; the reset after trial 4 hit the 60 s limit. e2t2: 4 limits, first walk 4.3 s (like session 5's all-limit e2t2, 4.2 s; every other e2t2 sequence since 11-02 started at 0.5-0.6 s). expanding: success, success, success, limit; the reset after trial 4 hit the 60 s limit. e2t2 1-trial: success (150 s), first walk 5.0 s; resets ok. Done. Roster complete. |
 
+## Top-up to 48 trials per condition (sessions 7 to 12)
+
+Decided 2026-11-12: every condition goes to 48 trials, the count `e2t2` and `retry` already have. 48 rather than 50 because `e2t2` and `expanding` carry their statistic across a 4-trial sequence, so 50 would leave a 2-trial remnant.
+
+| Condition | Target | Done | Remaining |
+|---|---|---|---|
+| `e2t2` | 12 seq | 12 | 0 |
+| `retry` | 12 seq | 12 | 0 |
+| `expanding` | 12 seq | 6 | 6 |
+| `sliding` | 12 seq | 6 | 6 |
+| `retry_nodecay` | 12 seq | 6 | 6 |
+| `e2t2` w/o memory (1-trial runs) | 48 | 24 | 24 |
+
+18 sequences (72 trials) plus 24 one-trial runs, roughly 2 h per session, so 12 h in all.
+
+**Code.** Sessions 1 to 6 ran on `door-experiment-v4.3`. `final` has since moved on: `c16a5ea` (closing trajectory, a no-op for the door) and an uncommitted `run_trials.py` change that stretches the walk limit with the walk's length (`RESET_SLACK`), which changes the door's reset timeout from 60 s to about 64 s. So the top-up runs from a separate checkout of `door-experiment-v4.4`, whose arm code is identical to v4.3, at `.claude/worktrees/door-v4.4` (detached, made 2026-11-12). The `final` working tree, with the covered-peg changes, is not touched. `--out` takes an absolute path, so the runs land in the same per-method folders as sessions 1 to 6.
+
+**Rig.** The door fixture was taken down for the covered peg-in-hole, and these runs happen after it is rebuilt. The master and the task file assume the lock where it was taught on 10-23. Before session 7, run one `retry` sequence into `evaluation_rigcheck/`. It does not count toward any condition, and that is decided before seeing it. If it is much worse than retry's 41/48 (say, 2 or more limits, or a failed reset), check the fixture position before going on. All six conditions then have runs from before and after the rebuild, but only three of them got trials after it. Note this as a limitation, and do not claim a rig effect either way.
+
+Check the checkout on the host (git in the container cannot follow the worktree's host path): `git -C .claude/worktrees/door-v4.4 describe --tags --exact-match` prints `door-experiment-v4.4` and `git -C .claude/worktrees/door-v4.4 status --short` prints nothing. Then, inside the container:
+
+```bash
+cd /home/jens/workspace/docker_intern_PiPER_ergodic/.claude/worktrees/door-v4.4/final/src
+TASK=../saved_recordings/door/task_20261023_131342.npz
+OUT=/home/jens/workspace/docker_intern_PiPER_ergodic/final/output
+
+# rig check, before session 7 only
+sh run.sh run_trials.py retry $TASK 4 --auto --fw V183 --out=$OUT/evaluation_rigcheck
+
+# one session: replace the three methods with that session's order from the table below
+for m in expanding sliding retry_nodecay; do
+  sh run.sh run_trials.py $m $TASK 4 --auto --fw V183 --out=$OUT/evaluation_$m || break
+done
+for i in 1 2 3 4; do
+  sh run.sh run_trials.py e2t2 $TASK 1 --auto --fw V183 --out=$OUT/evaluation_nomemory || break
+done
+```
+
+Each session has one sequence of each of the three conditions, in a rotated order (each condition goes first, middle and last twice). The four one-trial runs are the last block, as in sessions 1 to 6. A session may be split across a break. Make the split at a sequence boundary, never inside one.
+
+| Session | Order | Then | Date | Files (timestamps) | Notes |
+|---|---|---|---|---|---|
+| 7 | `expanding`, `sliding`, `retry_nodecay` | 4 x 1-trial | | | |
+| 8 | `sliding`, `retry_nodecay`, `expanding` | 4 x 1-trial | | | |
+| 9 | `retry_nodecay`, `expanding`, `sliding` | 4 x 1-trial | | | |
+| 10 | `expanding`, `retry_nodecay`, `sliding` | 4 x 1-trial | | | |
+| 11 | `sliding`, `expanding`, `retry_nodecay` | 4 x 1-trial | | | |
+| 12 | `retry_nodecay`, `sliding`, `expanding` | 4 x 1-trial | | | |
+
+After session 12, append the new files' SHA-256 to `final/saved_recordings/door/week9_runs.sha256` (or a new `.sha256` beside it), and rerun `final/paper/results_table.py`, whose numbers in the paper then change.
+
 ## Between sequences
 
 Nothing to do if the reset worked (it prints whether it reached the start). If it failed, take the key out by hand, close the door, put the arm near the master's start and press Enter when prompted. Note it in the session table.
@@ -102,3 +153,34 @@ Ranking for the ablation: success-rate drop from `retry` to `sliding` (what the 
 
 - `retry_nodecay` and `expanding` have never run on the arm, only the existing offline tests. Run `sh run.sh simulate.py retry_nodecay 1` and `... expanding 1` (fake arm, safe) before session 1.
 - `run_trials.py`'s usage line does not list `retry_nodecay`; it is accepted anyway because the check reads `METHODS`.
+
+## Covered peg-in-hole (internship report, 2026-11-12)
+
+A second task for the report, not part of the door experiment. Arm S-V1.8-2 (no `--fw`), run from the main `final/src` (it needs the closing trajectory, `c16a5ea`), task `task_20261111_194118`. Every trial is filmed.
+
+**Conditions.** `e2t2` with memory: 2 sequences of 5 trials, the statistic handed on within a sequence. This is the strongest baseline from the door. `retry` (Ours): 10 trials. It starts every trial fresh, so how they are batched does not matter.
+
+**Success rule, fixed before the remaining trials.** The operator presses Enter once the peg is in the hole. The file records that as `abort`, and in this folder every `abort` is a success, so press Enter for nothing else and use Ctrl-C to stop for any other reason. A trial that hits the 600 s limit is a failure. Success time is when the phase first reaches its trial maximum. `run_retry_20261112_105210` is the one correction: Enter was missed on an insertion confirmed on video, so its outcome was set to `success` on 11-12, with a `note` in the file and the original kept as `.npz.orig`.
+
+**On disk** (`final/saved_recordings/evaluation_covered_peg_appendix/`): `retry` 3 of 10 (105210 402.5 s, 105711 165.3 s, 110602 364.0 s, all successes). `run_e2t2_20261112_103618` is a one-trial run, not a memory sequence, so it does not count toward the 2 x 5. `run_e2t2_20261112_102031` is an empty start.
+
+**Order** (alternating, so drift over the day hits both alike):
+
+| Block | Run | Date | File | Outcomes |
+|---|---|---|---|---|
+| 1 | `e2t2` sequence of 5 | | | |
+| 2 | `retry` x4 | | | |
+| 3 | `e2t2` sequence of 5 | | | |
+| 4 | `retry` x3 | | | |
+
+Inside the container. `$CAN` is the interface the S-V1.8-2 arm is on: `can0` with one adapter plugged in, otherwise check it with the `rx_packets` test.
+
+```bash
+cd /home/jens/workspace/docker_intern_PiPER_ergodic/final/src
+TASK=../saved_recordings/covered-peg-in-hole/task_20261111_194118.npz
+OUTC=../saved_recordings/evaluation_covered_peg_appendix
+sh run.sh run_trials.py e2t2  $TASK 5 --auto --can $CAN --out=$OUTC   # blocks 1 and 3
+sh run.sh run_trials.py retry $TASK 4 --auto --can $CAN --out=$OUTC   # block 2; 3 for block 4
+```
+
+A sequence cut short (Ctrl-C, CAN, E-stop) is not a full sequence: rerun it from the start and move the partial file to `excluded/`. About 1.5 to 2 h for the e2t2 sequences (trials that reach the limit take 10 min) plus about 50 min of retry.

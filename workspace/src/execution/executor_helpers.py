@@ -6,11 +6,17 @@ import time
 import numpy as np
 from pyAgxArm import AgxArmFactory, ArmModel, PiperFW, create_agx_arm_config
 
+from controller.feed_forward import FIRMWARE
+
+# Per arm: S-V1.8-2 needs DEFAULT, S-V1.8-3..7 needs V183 (ask get_firmware()). The
+# profiles scale t_ff differently, so the wrong one mis-scales joints 1-3. `--fw` is
+# parsed in controller.feed_forward, which holds the per-arm constants.
+
 
 def connect_arm():
     cfg = create_agx_arm_config(
         robot=ArmModel.PIPER,
-        firmeware_version=PiperFW.DEFAULT,  # this arm reports S-V1.8-2
+        firmeware_version={"DEFAULT": PiperFW.DEFAULT, "V183": PiperFW.V183}[FIRMWARE],
         channel="can0",
     )
     robot = AgxArmFactory.create_arm(cfg)
@@ -35,9 +41,10 @@ def read_joint_velocities(robot) -> np.ndarray:  # (6,) rad/s
 
 def apply_joint_torques(robot, tau: np.ndarray) -> None:  # tau (6,) N·m
     cfg = robot.get_config()
-    # The SDK clamps t_ff to 8*b*c and carries on; a clamped joint has lost its
+    # The SDK clamps t_ff to 8*b*c (8*c under V183) and carries on; a clamped joint has lost its
     # damping and oscillates at the limit, so stop instead and let the caller hold.
-    t_ff_limit = 8.0 * np.array(cfg["joint_torque_b"]) * np.array(cfg["joint_torque_c"])
+    b = np.array(cfg["joint_torque_b"]) if FIRMWARE == "DEFAULT" else 1.0
+    t_ff_limit = 8.0 * b * np.array(cfg["joint_torque_c"])
     if np.any(np.abs(tau) > t_ff_limit):
         raise RuntimeError(
             f"torque limit exceeded: tau = {np.round(tau, 3)} N·m, "

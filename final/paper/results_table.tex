@@ -1,17 +1,20 @@
 \begin{table*}[t]
 \centering
-\caption{Door task, per condition: success rate with its Wilson 95\,\% interval, Fisher's exact test of the success rate against Ours (two-sided, uncorrected), and completion time of the successful trials. A trial fails at the 600\,s limit.}
+\caption{Door task, per condition: count and rate with its Wilson 95\,\% interval for each fraction, and the median [IQR] completion time of the successful trials. Metrics are defined in Table~\ref{tab:metrics}.}
 \label{tab:results}
-\begin{tabular}{lcccc}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{2.6cm}ccccccc}
 \toprule
-Condition & $n$ & Success [95\,\% CI] & $p$ vs Ours & $t_\mathrm{c}$ (s), median [IQR] \\
+Condition & $n$ & Success & Failure & $t_\mathrm{c}$ (s) & Recovery & Post-recovery & Repeated \\
+ & & rate & rate & & rate & progress rate & failure rate \\
 \midrule
-Ours & 48 & 0.85 [0.73, 0.93] & -- & 176 [91, 243] \\
-Ours w/o Retreat & 24 & 0.12 [0.04, 0.31] & $2.0\times10^{-9}$ & 55 [52, 199] \\
-Ours w/o Visitation Decay & 24 & 0.58 [0.39, 0.76] & 0.018 & 104 [81, 126] \\
-E2T2 & 48 & 0.69 [0.55, 0.80] & 0.088 & 25 [18, 44] \\
-E2T2 w/o memory & 24 & 0.58 [0.39, 0.76] & 0.018 & 164 [139, 243] \\
-Monotonic expansion & 24 & 0.50 [0.31, 0.69] & 0.004 & 304 [242, 412] \\
+Full target distribution & 48 & \begin{tabular}[t]{@{}c@{}}$33/48$\\0.69 [0.55, 0.80]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$15/48$\\0.31 [0.20, 0.45]\end{tabular} & \begin{tabular}[t]{@{}c@{}}25\\{}[18, 44]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$74/99$\\0.75 [0.65, 0.82]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$26/74$\\0.35 [0.25, 0.46]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$13/20$\\0.65 [0.43, 0.82]\end{tabular} \\
+Full target distribution (single trial) & 24 & \begin{tabular}[t]{@{}c@{}}$14/24$\\0.58 [0.39, 0.76]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$10/24$\\0.42 [0.24, 0.61]\end{tabular} & \begin{tabular}[t]{@{}c@{}}164\\{}[139, 243]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$99/116$\\0.85 [0.78, 0.91]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$42/99$\\0.42 [0.33, 0.52]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$19/24$\\0.79 [0.60, 0.91]\end{tabular} \\
+Monotonic expansion & 24 & \begin{tabular}[t]{@{}c@{}}$12/24$\\0.50 [0.31, 0.69]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$12/24$\\0.50 [0.31, 0.69]\end{tabular} & \begin{tabular}[t]{@{}c@{}}304\\{}[242, 412]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$128/154$\\0.83 [0.76, 0.88]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$43/128$\\0.34 [0.26, 0.42]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$22/24$\\0.92 [0.74, 0.98]\end{tabular} \\
+Ours w/o Retreat & 24 & \begin{tabular}[t]{@{}c@{}}$3/24$\\0.12 [0.04, 0.31]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$21/24$\\0.88 [0.69, 0.96]\end{tabular} & \begin{tabular}[t]{@{}c@{}}55\\{}[52, 199]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$223/288$\\0.77 [0.72, 0.82]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$9/223$\\0.04 [0.02, 0.07]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$22/23$\\0.96 [0.79, 0.99]\end{tabular} \\
+Ours w/o Visitation Decay & 24 & \begin{tabular}[t]{@{}c@{}}$14/24$\\0.58 [0.39, 0.76]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$10/24$\\0.42 [0.24, 0.61]\end{tabular} & \begin{tabular}[t]{@{}c@{}}104\\{}[81, 126]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$58/77$\\0.75 [0.65, 0.84]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$30/58$\\0.52 [0.39, 0.64]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$18/22$\\0.82 [0.61, 0.93]\end{tabular} \\
+\textbf{Ours} & 48 & \begin{tabular}[t]{@{}c@{}}$41/48$\\0.85 [0.73, 0.93]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$7/48$\\0.15 [0.07, 0.27]\end{tabular} & \begin{tabular}[t]{@{}c@{}}176\\{}[91, 243]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$418/442$\\0.95 [0.92, 0.96]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$287/418$\\0.69 [0.64, 0.73]\end{tabular} & \begin{tabular}[t]{@{}c@{}}$44/46$\\0.96 [0.85, 0.99]\end{tabular} \\
 \bottomrule
 \end{tabular}
 \end{table*}
