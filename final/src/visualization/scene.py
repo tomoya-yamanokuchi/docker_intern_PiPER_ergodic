@@ -79,22 +79,25 @@ def draw_cloud(node, p: np.ndarray, colors: np.ndarray, size: float = POINT_SIZE
 
 
 def draw_frames(node, p: np.ndarray, rot: np.ndarray, colors: np.ndarray) -> None:
-    """Tool frames at p (n, 3) m, rot (n, 3, 3): the key's axis (z) long, its x short.
-
-    The x stub is what shows a turn of the key, which moves its tip nowhere.
-    """
-    z_end = p + FRAME_LENGTH * rot[:, :, 2]
-    x_end = p + 0.5 * FRAME_LENGTH * rot[:, :, 0]
-    for name, end in (("z", z_end), ("x", x_end)):
-        segments = np.stack([p, end], axis=1).reshape(-1, 3)
+    """Tool frames at p (n, 3) m, rot (n, 3, 3): x, y, z in red, green, blue, and a dot of
+    colors (n, 3) at each origin, so the axes read as a frame and the dot carries the label."""
+    for axis, (name, rgb) in enumerate(zip("xyz", np.eye(3), strict=True)):
+        segments = np.stack([p, p + FRAME_LENGTH * rot[:, :, axis]], axis=1).reshape(-1, 3)
         node[name].set_object(
             g.LineSegments(
                 g.PointsGeometry(
-                    segments.T.astype(np.float32), np.repeat(colors, 2, axis=0).T.astype(np.float32)
+                    segments.T.astype(np.float32),
+                    np.tile(rgb, (len(segments), 1)).T.astype(np.float32),
                 ),
                 g.LineBasicMaterial(vertexColors=True),
             )
         )
+    node["origin"].set_object(
+        g.Points(
+            g.PointsGeometry(p.T.astype(np.float32), colors.T.astype(np.float32)),
+            g.PointsMaterial(size=0.004),
+        )
+    )
 
 
 def draw_axes(node, length: float = 0.04, radius: float = 0.0015) -> None:

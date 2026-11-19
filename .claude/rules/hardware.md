@@ -1,7 +1,7 @@
 ---
 paths:
-  - "workspace/src/agx_reference/piper/**"
-  - "workspace/src/agx_reference/controller/**"
+  - "final/src/agx_reference/piper/**"
+  - "final/src/agx_reference/controller/**"
 ---
 
 # Hardware boundary

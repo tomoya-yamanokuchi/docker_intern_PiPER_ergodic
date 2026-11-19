@@ -87,10 +87,10 @@ Decided 2026-11-12: every condition goes to 48 trials, the count `e2t2` and `ret
 |---|---|---|---|
 | `e2t2` | 12 seq | 12 | 0 |
 | `retry` | 12 seq | 12 | 0 |
-| `expanding` | 12 seq | 6 | 6 |
-| `sliding` | 12 seq | 6 | 6 |
-| `retry_nodecay` | 12 seq | 6 | 6 |
-| `e2t2` w/o memory (1-trial runs) | 48 | 24 | 24 |
+| `expanding` | 12 seq | 12 | 0 |
+| `sliding` | 12 seq | 12 | 0 |
+| `retry_nodecay` | 12 seq | 12 | 0 |
+| `e2t2` w/o memory (1-trial runs) | 48 | 48 | 0 |
 
 18 sequences (72 trials) plus 24 one-trial runs, roughly 2 h per session, so 12 h in all.
 
@@ -121,12 +121,12 @@ Each session has one sequence of each of the three conditions, in a rotated orde
 
 | Session | Order | Then | Date | Files (timestamps) | Notes |
 |---|---|---|---|---|---|
-| 7 | `expanding`, `sliding`, `retry_nodecay` | 4 x 1-trial | | | |
-| 8 | `sliding`, `retry_nodecay`, `expanding` | 4 x 1-trial | | | |
-| 9 | `retry_nodecay`, `expanding`, `sliding` | 4 x 1-trial | | | |
-| 10 | `expanding`, `retry_nodecay`, `sliding` | 4 x 1-trial | | | |
-| 11 | `sliding`, `expanding`, `retry_nodecay` | 4 x 1-trial | | | |
-| 12 | `retry_nodecay`, `sliding`, `expanding` | 4 x 1-trial | | | |
+| 7 | `expanding`, `sliding`, `retry_nodecay` | 4 x 1-trial | 2026-11-13 | expanding: `evaluation_expanding/run_expanding_20261113_142626`; sliding: `evaluation_sliding/run_sliding_20261113_145841`; retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261113_152150`; e2t2 1-trial x4: `evaluation_nomemory/run_e2t2_20261113_153215`, `153825`, `154221`, `155359` | Rig check (not counted), `evaluation_rigcheck/`: `run_retry_20261113_132046` interrupted (621 KB, no trials); `run_retry_20261113_133318` 4 success, so the rig passes. Also in `evaluation_rigcheck/`: `run_e2t2_20261113_140751` (limit, limit, limit, success), an e2t2 sequence not in the plan, not counted. expanding: 4 success. sliding: limit, limit, limit, success. retry_nodecay: success, success, limit, success. e2t2 1-trial x4: limit, success, success, limit; the reset after the last hit the 60 s limit (the others took 0.5-0.6 s to the start). Done. |
+| 8 | `sliding`, `retry_nodecay`, `expanding` | 4 x 1-trial | 2026-11-16 | sliding: `evaluation_sliding/run_sliding_20261116_104133`; retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261116_110836`; expanding: `evaluation_expanding/run_expanding_20261116_114250`; e2t2 1-trial x4: `evaluation_nomemory/run_e2t2_20261116_122906`, `123125`, `124147`, `125320` | sliding: limit, limit, limit, success; one reset hit the 60 s limit. retry_nodecay: 4 success; resets ok (13.1-13.2 s). expanding: success, limit, limit, limit; one reset hit the 60 s limit. e2t2 1-trial x4: success, success, limit, limit; resets ok. Done. |
+| 9 | `retry_nodecay`, `expanding`, `sliding` | 4 x 1-trial | 2026-11-16 | retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261116_131053`; expanding: `evaluation_expanding/run_expanding_20261116_135714`; sliding: `evaluation_sliding/run_sliding_20261116_143817`; e2t2 1-trial x4: `evaluation_nomemory/run_e2t2_20261116_144237`, `144534`, `144903`, `145851` | retry_nodecay: success, limit, success, success; resets ok. expanding: 4 limits; the reset after trial 1 hit the 60 s limit without reaching the start. sliding: limit, success, limit, limit; the reset after trial 3 hit the 60 s limit without reaching the start. e2t2 1-trial x4: 4 success; resets ok. Done. |
+| 10 | `expanding`, `retry_nodecay`, `sliding` | 4 x 1-trial | 2026-11-16 | expanding: `evaluation_expanding/run_expanding_20261116_153046`; retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261116_160229`; sliding: `evaluation_sliding/run_sliding_20261116_165308`; e2t2 1-trial x4: `evaluation_nomemory/run_e2t2_20261116_170330`, `171629`, `171826`, `172850` | expanding: success, success, limit, limit; resets ok. retry_nodecay: success, success, limit, success; resets ok. sliding: 4 limits; the reset after trial 2 hit the 60 s limit without reaching the start. e2t2 1-trial x4: limit, limit, success, limit; resets ok. Done. |
+| 11 | `sliding`, `expanding`, `retry_nodecay` | 4 x 1-trial | 2026-11-16, 11-17 | sliding: `evaluation_sliding/run_sliding_20261116_181042`; expanding: `evaluation_expanding/run_expanding_20261116_184917`; retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261116_195710`; e2t2 1-trial x4 (11-17, session continued on a new day): `evaluation_nomemory/run_e2t2_20261117_101405`, `101942`, `102632`, `102919` | sliding: 4 limits; resets ok. expanding: limit, success, success, success; resets ok. retry_nodecay: success, limit, success, success; resets ok. e2t2 1-trial x4: limit, success, success, success; resets ok. Done. |
+| 12 | `retry_nodecay`, `sliding`, `expanding` | 4 x 1-trial | 2026-11-17 | retry_nodecay: `evaluation_retry_nodecay/run_retry_nodecay_20261117_105605`; sliding: `evaluation_sliding/run_sliding_20261117_113128`; expanding: `evaluation_expanding/run_expanding_20261117_124517`; e2t2 1-trial x4: `evaluation_nomemory/run_e2t2_20261117_124934`, `125418`, `130727`, `131028` | retry_nodecay: success, success, success, limit; resets ok. sliding: success, limit, success, limit; resets ok. expanding: success, limit, success, success; resets ok. e2t2 1-trial x4: success, success, limit, success; resets ok. Done. Top-up complete; checksums of sessions 7-12 appended to `week9_runs.sha256`. |
 
 After session 12, append the new files' SHA-256 to `final/saved_recordings/door/week9_runs.sha256` (or a new `.sha256` beside it), and rerun `final/paper/results_table.py`, whose numbers in the paper then change.
 
@@ -160,17 +160,17 @@ A second task for the report, not part of the door experiment. Arm S-V1.8-2 (no 
 
 **Conditions.** `e2t2` with memory: 2 sequences of 5 trials, the statistic handed on within a sequence. This is the strongest baseline from the door. `retry` (Ours): 10 trials. It starts every trial fresh, so how they are batched does not matter.
 
-**Success rule, fixed before the remaining trials.** The operator presses Enter once the peg is in the hole. The file records that as `abort`, and in this folder every `abort` is a success, so press Enter for nothing else and use Ctrl-C to stop for any other reason. A trial that hits the 600 s limit is a failure. Success time is when the phase first reaches its trial maximum. `run_retry_20261112_105210` is the one correction: Enter was missed on an insertion confirmed on video, so its outcome was set to `success` on 11-12, with a `note` in the file and the original kept as `.npz.orig`.
+**Success rule, fixed before the remaining trials.** The operator presses Enter once the peg is in the hole. The file records that as `abort`, and in this folder every `abort` is a success, so press Enter for nothing else and use Ctrl-C to stop for any other reason. A trial that hits the 600 s limit is a failure. Success time is when the phase first reaches its trial maximum. Two corrections, `run_retry_20261112_105210` and `run_retry_20261112_161814`: Enter was missed on an insertion confirmed on video, so their outcomes were set to `success` on 11-12, each with a `note` in the file and the original kept as `.npz.orig`.
 
-**On disk** (`final/saved_recordings/evaluation_covered_peg_appendix/`): `retry` 3 of 10 (105210 402.5 s, 105711 165.3 s, 110602 364.0 s, all successes). `run_e2t2_20261112_103618` is a one-trial run, not a memory sequence, so it does not count toward the 2 x 5. `run_e2t2_20261112_102031` is an empty start.
+**On disk** (`final/saved_recordings/evaluation_covered_peg_appendix/`): `retry` 10 of 10, done: 6 successes (105210 402.5 s, 105711 165.3 s, 110602 364.0 s, 155103 358.7 s, 161814 455.3 s, 20261113_105117 131.0 s), 4 limits (154327, 160223, 163120, 20261113_110522). `e2t2` 10 of 10, done: 0 successes. Moved to `excluded/` on 11-12: `run_e2t2_20261112_102031` (empty start), `run_e2t2_20261112_103618` (a one-trial run, not a memory sequence), `run_e2t2_20261112_123318` (interrupted at 74.6 s).
 
 **Order** (alternating, so drift over the day hits both alike):
 
 | Block | Run | Date | File | Outcomes |
 |---|---|---|---|---|
-| 1 | `e2t2` sequence of 5 | | | |
+| 1 | `e2t2` sequence of 5 | 2026-11-12 | `run_e2t2_20261112_135032` | 5 limits (highest phase 0.44-0.52); resets ok |
 | 2 | `retry` x4 | | | |
-| 3 | `e2t2` sequence of 5 | | | |
+| 3 | `e2t2` sequence of 5 | 2026-11-12 | `run_e2t2_20261112_144825` | 5 limits (highest phase 0.23-0.52); resets ok |
 | 4 | `retry` x3 | | | |
 
 Inside the container. `$CAN` is the interface the S-V1.8-2 arm is on: `can0` with one adapter plugged in, otherwise check it with the `rx_packets` test.
@@ -184,3 +184,42 @@ sh run.sh run_trials.py retry $TASK 4 --auto --can $CAN --out=$OUTC   # block 2;
 ```
 
 A sequence cut short (Ctrl-C, CAN, E-stop) is not a full sequence: rerun it from the start and move the partial file to `excluded/`. About 1.5 to 2 h for the e2t2 sequences (trials that reach the limit take 10 min) plus about 50 min of retry.
+
+### Covered peg-in-hole ablation (2026-11-17)
+
+The same task and arm as above, now with the door's four other conditions so the covered peg has all six. `retry` and `e2t2` (10 trials each) are on disk and are not rerun. Two sessions of 5 trials per condition, 10 in all.
+
+**The success rule differs from the appendix runs.** A trial ends itself as a success once the phase passes 0.8 (`--success-phase=0.8`), so Enter is no longer used for success. After the sessions, check each `success` on the video; a trial that was not an insertion is changed to a failure (a `note` in the file, the original kept as `.npz.orig`, as before). Enter and Ctrl-C still stop a trial and are not successes. The reset after a success is the door's (the offset fades along the master); the appendix runs' Enter-aborts were reset without the fade.
+
+Each condition has its own folder, so `analyse_runs.py` does not pool them. `expanding` hands its statistic on, so a session's 5 trials are one sequence (session 2 starts a new one). The no-memory runs are 1-trial `e2t2` runs, as on the door.
+
+```bash
+cd /home/jens/workspace/docker_intern_PiPER_ergodic/final/src
+TASK=../saved_recordings/covered-peg-in-hole/task_20261111_194118.npz
+OUT=../saved_recordings/evaluation_covered_peg_ablation
+F="--auto --can $CAN --success-phase=0.8"
+
+# one session; session 2 runs the first loop in the order retry_nodecay expanding sliding
+for m in sliding retry_nodecay expanding; do
+  sh run.sh run_trials.py $m $TASK 5 $F --out=$OUT/evaluation_$m || break
+done
+for i in 1 2 3 4 5; do
+  sh run.sh run_trials.py e2t2 $TASK 1 $F --out=$OUT/evaluation_nomemory || break
+done
+```
+
+A cut-short `expanding` sequence is rerun from the start, with the partial file moved to `excluded/`. A limit trial takes 10 min, so budget 3 to 4 h per session if most of them limit.
+
+| Session | Date | Files | Notes |
+|---|---|---|---|
+| 1, with damping | 2026-11-17 | all moved to `evaluation_covered_peg_ablation/with_damping/` | Run with the damping addition, which was then removed, so these do not count. 5 per condition: sliding 5/5 (20-23 s; one Enter abort removed), retry_nodecay 0/5, expanding 5/5, e2t2 w/o memory 5/5 (28-103 s; two 0-1 s aborts excluded). Kept as a record; `sliding` trial 2 removal is in its `.npz.orig`. |
+| 1, redo | | | |
+| 2 | | | |
+
+**Session 1 redo, without the damping addition.** The full block again: 5 `sliding`, 5 `retry_nodecay`, 5 `expanding`, 5 one-trial `e2t2`. Same `TASK`, `OUT`, `F` and the first-session loop above, which writes to fresh `evaluation_<method>/` folders now that the old ones are in `with_damping/`. `retry` and `e2t2` with memory (11-12/13) were run with the damping addition or not, and must be re-checked for comparability before they sit in the same table.
+
+Enter only for a trial you had to touch, and not at the start. A trial that aborts early is excluded, not counted as a failure, and rerun.
+
+**Open before session 2.** The video review of each `success`, and whether the fixture is where it was taught. Session 2 is then the same block in the order `retry_nodecay expanding sliding`, then 5 no-memory runs.
+
+**Totals when done** (valid trials): `sliding` 10, `retry_nodecay` 10, `expanding` 10 (2 sequences of 5), `e2t2` w/o memory 10.

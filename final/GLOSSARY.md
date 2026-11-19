@@ -158,7 +158,7 @@ _Avoid_: good run, clean run
 The paper names some concepts differently from the code; the code keeps the names above.
 
 **Sequential Ergodic Control**:
-The method in the paper (retry in the code), "Ours" in tables. A working name.
+The method in the paper (retry in the code), "SEC" in tables (not "Ours": the paper uses no first-person pronouns). A working name.
 _Avoid_: sequential ergodic retry
 
 **Expert trajectory**:

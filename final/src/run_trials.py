@@ -32,8 +32,9 @@ at the measured pose, not where the last one ended, keeps the commanded velocity
 law's own, so the friction feedforward always has the law's direction, even when the arm
 lags. A lead grows only until the spring pushes with MAX_FORCE.
 
-Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry> task_<ts>.npz [n_trials] [--auto] [--out=DIR]
-The runs go to DIR (made if missing), default final/output/evaluation.
+Run from final/src:  sh run.sh run_trials.py <e2t2|sliding|retry> task_<ts>.npz [n_trials] [--auto] [--out=DIR] [--success-phase=P]
+The runs go to DIR (made if missing), default final/output/evaluation. P replaces SUCCESS_PHASE
+for this run (the covered peg counts as in the hole at 0.8).
 """
 
 import multiprocessing
@@ -365,7 +366,11 @@ def main(
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--auto" and not a.startswith("--out=")]
+    flags = ("--out=", "--success-phase=")
+    args = [a for a in sys.argv[1:] if a != "--auto" and not a.startswith(flags)]
+    for a in sys.argv:
+        if a.startswith("--success-phase="):
+            SUCCESS_PHASE = float(a[len("--success-phase=") :])
     out = [Path(a[len("--out=") :]) for a in sys.argv if a.startswith("--out=")]
     method, task_path = args[0], Path(args[1])
     if method not in METHODS:
