@@ -1,163 +1,38 @@
-# ============================================================
-# Python
-# ============================================================
+# Python and tool caches
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-
-.claude/
-.git/
-report/
-
-# Python environments
 .venv/
-venv/
-env/
-ENV/
-
-# Package / build artifacts
-build/
-dist/
-*.egg-info/
-.eggs/
-
-# Test / lint / type-check caches
 .pytest_cache/
-.mypy_cache/
 .ruff_cache/
-.coverage
-htmlcov/
-
-
-# ============================================================
-# CMake / catkin build artifacts
-# ============================================================
-
-double_PiPER/build/
-double_PiPER/devel/
-double_PiPER/install/
-double_PiPER/log/
-double_PiPER/src/piper_sim/
-double_PiPER/src/piper_moveit/
-
-
-# ============================================================
-# Jupyter
-# ============================================================
 .ipynb_checkpoints/
 
-# Keep actual notebooks (*.ipynb) under version control.
-
-
-# ============================================================
-# Local experiment outputs
-# ============================================================
-logs/
-log/
-outputs/
-output/
-results/
-tmp/
-temp/
-
-*.log
-
-# Weekly progress reports (LaTeX), kept out of the code history
-weekly_reports/
-final/
-handoff/
-pictures/
-
-# Uncomment these if generated figures/videos should NOT be versioned.
-# figures/
-# videos/
-# *.mp4
-# *.gif
-
-
-# ============================================================
-# External repositories / temporary clones
-# ============================================================
-
-# If the original E2T2 repository is cloned only as an upstream reference,
-# ignore the clone and keep your modified notebooks/scripts elsewhere.
-workspace/Ergodic_Exploration_using_Tensor_Train/
-
-# If you instead want to version-control your modified E2T2 notebooks,
-# place them in e.g. notebooks/ and keep that directory tracked.
-
-
-# ============================================================
-# IDE / editor
-# ============================================================
+# Editor / OS
 .vscode/
 .idea/
 *.swp
-*.swo
 *~
-.project
-.pydevproject
-
-
-# ============================================================
-# OS-generated files
-# ============================================================
 .DS_Store
-Thumbs.db
 
+# Output of the scripts: masters, explorations, tasks and runs land here first.
+# Copy a recording worth keeping into final/saved_recordings/ and track it there.
+final/output/
+final/saved_recordings/evaluation_*/
 
-# ============================================================
-# Environment / machine-local settings
-# ============================================================
-.env
-.env.*
-!.env.example
+# Reports, papers and notes: kept out of the code history
+weekly_reports/
+report/
+final/paper/
+handoff/
+pictures/
+experiment_roster.md
+week9.md
+report_edits.md
 
-# Jupyter runtime files
-.jupyter/
-.local/share/jupyter/runtime/
+# Claude Code configuration and agent notes
+.claude/
+CLAUDE.md
+docs/agents/
 
-
-# ============================================================
-# Robot / CAN local configuration
-# ============================================================
-
-# Add machine-specific CAN/USB configuration files here if created.
-# Example:
-# config/can_local.yaml
-
-
-# ============================================================
-# Large local datasets / recordings
-# ============================================================
-data/
-datasets/
-recordings/
-bags/
-*.bag
-
-# Figures made from kept demonstrations: regenerable from the code. The kept
-# demonstrations themselves, workspace/saved_recordings/, are tracked -- a
-# recording cannot be regenerated without retaking it on the arm.
-workspace/plots/
-
-
-# ============================================================
-# Optional model / checkpoint files
-# ============================================================
-checkpoints/
-*.ckpt
-*.pth
-*.pt
-*.onnx
-
-.make
-
-# ============================================================
-# Vendored robot description
-# ============================================================
-
-# agx_reference carries its own description and all of it is tracked: the URDF
-# references the .dae meshes for <visual> and the .stl meshes for <collision>,
-# so ignoring either set would leave a fresh clone with an unloadable model.
+# Removed trees whose untracked leftovers may remain on disk
+workspace/
+double_PiPER/

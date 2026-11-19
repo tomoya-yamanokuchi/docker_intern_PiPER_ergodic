@@ -20,9 +20,6 @@ touch ${XAUTH}
 xauth nlist "${DISPLAY}" | sed -e 's/^..../ffff/' | xauth -f ${XAUTH} nmerge -
 chmod 644 ${XAUTH}
 
-# PYTHONPATH carries two import roots: our code in workspace/src, and
-# agx_reference, whose files import core.* / controller.* as top-level packages.
-#
 # OPENBLAS_NUM_THREADS=1 because OpenBLAS spawns threads across all 24 cores even
 # for the tiny SVDs of ErgodicController.step's tensor-train rounding, and the spawn
 # dominates: one round(rmax=36) costs up to 118 ms multithreaded against 2 ms on one
@@ -41,14 +38,8 @@ docker run --rm -it \
     --volume "${XAUTH}:${XAUTH}:ro" \
     --volume "/tmp/.X11-unix:/tmp/.X11-unix:ro" \
     \
-    --env PYTHONPATH="/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic/workspace/src:/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic/workspace/src/agx_reference" \
-    \
     --env OPENBLAS_NUM_THREADS=1 \
     \
-	--volume "/home/${USR_NAME}/Ergodic_Exploration_using_Tensor_Train:/home/${USR_NAME}/workspace/Ergodic_Exploration_using_Tensor_Train" \
-	\
-	--volume "/home/${USR_NAME}/agilex-arm-gravity-compensation:/home/${USR_NAME}/workspace/agilex-arm-gravity-compensation" \
-	\
     --volume "/home/${USR_NAME}/docker_intern_PiPER_ergodic:/home/${USR_NAME}/workspace/docker_intern_PiPER_ergodic" \
     \
     ${IMAGE_NAME} \
